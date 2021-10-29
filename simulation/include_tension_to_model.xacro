@@ -1,0 +1,14 @@
+<plugin name="example" filename="libusv_gazebo_thrust_plugin.so">
+  <!-- General plugin parameters -->
+  <cmdTimeout>1.0</cmdTimeout>
+
+  <boat>
+    <linkName>boat_top</linkName>
+    <propJointName>left_engine_propeller_joint</propJointName>
+    <engineJointName>left_chasis_engine_joint</engineJointName>
+    <cmdTopic>tension_mag</cmdTopic>
+    <direcTopic>tension_direction</direcTopic>
+    <maxMag>10.0</maxMag>
+  </boat>
+</plugin>
+

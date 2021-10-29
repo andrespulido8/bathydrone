@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<robot name="navigator" xmlns:xacro="http://ros.org/wiki/xacro">
+  <!-- Defines the base vehicle -->
+  <xacro:include filename="$(find wamv_description)/urdf/wamv_base.urdf.xacro" />
+
+  <!-- Attach hydrodynamics plugin -->
+  <xacro:include filename="$(find wamv_gazebo)/urdf/macros.xacro" />
+  <xacro:usv_dynamics_gazebo name="wamv_dynamics_plugin"/>
+                                                                                                                                                                                                                1,1           Top
+</robot>
