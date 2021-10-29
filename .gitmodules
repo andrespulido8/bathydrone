@@ -1,0 +1,3 @@
+[submodule "simulation/vrx"]
+	path = simulation/vrx
+	url = https://github.com/osrf/vrx
