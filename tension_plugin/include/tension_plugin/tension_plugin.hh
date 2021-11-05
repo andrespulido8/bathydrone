@@ -21,22 +21,22 @@ namespace gazebo
   // Foward declaration of Tension class
   class Tension;
 
-  /// \brief Thruster class
-  class Boat //replacing Thruster
+  /// \brief Boat class
+  class Boat 
   {
     /// \brief Constructor
     /// \param[in] _parent Pointer to an SDF element to parse.
-    public: explicit Thruster(UsvThrust *_parent);
+    public: explicit Boat(Tension *_parent);
 
     
     /// TODO:fill out the topic message and data type 
-    ///\brief Callback for new thrust commands.
-    /// \param[in] _msg The thrust message to process.
-    public: void OnThrustCmd(const std_msgs::Float32::ConstPtr &_msg);
+    ///\brief Callback for new maginitude commands.
+    /// \param[in] _msg The tension message to process.
+    public: void OnTensionMagnitude(const std_msgs::Float32::ConstPtr &_msg);
 
-    /// \brief Callback for new thrust angle commands.
-    /// \param[in] _msg The thrust angle message to process.
-    public: void OnThrustAngle(const std_msgs::Float32::ConstPtr &_msg);
+    /// \brief Callback for new tension direction commands.
+    /// \param[in] _msg The thrust e message to process.
+    public: void OnTensionDirection(const std_msgs::Float32::ConstPtr &_msg);
 
     /// \brief Maximum abs val of incoming Tension.
     public: double maxMag;
@@ -65,17 +65,8 @@ namespace gazebo
     /// \brief Last time of update
     public: common::Time lastAngleUpdateTime;
 
-    /// \brief Joint controlling the propeller.
-    public: physics::JointPtr propJoint;
-
-    /// \brief Joint controlling the engine.
-    public: physics::JointPtr engineJoint;
-
-    /// \brief PID for engine joint angle
-    public: common::PID engineJointPID;
-
     /// \brief Plugin parent pointer - for accessing world, etc.
-    protected: UsvTension *plugin;
+    protected: Tension *plugin;
   };
 
   /// \brief A plugin to simulate a tension force applied to a model.
@@ -141,11 +132,9 @@ namespace gazebo
     /// \brief Takes ROS tension vector direction and mapps it to tension vector
     /// \param[in] _direc ROS direction
     /// \return force of tension vector.
-    ///TODO: change data structure
-    private: double DirecToTension(const double _cmd,
-                                   const double _max_cmd,
-                                   const double _max_pos,
-                                   const double _max_neg) const;
+    private: ignition::math::Vector3d DirecToTension(const double _mag,
+                                   const double _maxMag,
+                                   ignition::math::Vector3d _Direc) const;
 
 
     /// \brief A mutex to protect member variables accessed during
@@ -166,17 +155,8 @@ namespace gazebo
     /// \brief Timeout for receiving Drive commands [s].
     private: double cmdTimeout;
 
-    /// \brief Vector of thruster instances//
-    private: std::vector<Thruster> thrusters;
-
     /// \brief Pointer to the update event connection.
     private: event::ConnectionPtr updateConnection;
-
-    /// \brief For publishing to /joint_state with propeller state.//
-    private: ros::Publisher jointStatePub;
-
-    /// \brief The propeller message state.//
-    private: sensor_msgs::JointState jointStateMsg;
 
     /// \brief Update rate (Hz) of the joint ROS publisher.
     private: double publisherRate = 100.0;

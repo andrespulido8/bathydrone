@@ -1,0 +1,6 @@
+<?xml version=1.9"?>
+<launch>
+ <launch> 
+  <include file="$(find )/sydneyregatta.launch" name="n" pkg="vrx_gazebo" type="" output=""/>
+ <arg urdf="`pwd`/../simulation/boat_model/bathyboat_custom.urdf">
+</launch>
