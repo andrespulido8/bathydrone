@@ -1,6 +1,0 @@
-<?xml version=1.9"?>
-<launch>
-  <node pkg="drone_trajectory" type="drone_trajectory_node.cpp" name="drone_trajectory_node"/>
-  <include file="$(find )/sydneyregatta.launch" name="n" pkg="vrx_gazebo" type="" output=""/>
-   <arg urdf="`pwd`/../simulation/boat_model/bathyboat_custom.urdf">
-</launch>

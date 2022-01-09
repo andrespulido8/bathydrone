@@ -1,6 +1,6 @@
 #include <boost/algorithm/clamp.hpp>
 #include <ros/time.h>
-
+#include "geometry_msgs/Vector3.h"
 #include <cmath>
 #include <functional>
 
@@ -161,10 +161,10 @@ void Tension::Load(physics::ModelPtr _parent, sdf::ElementPtr _sdf)
 }
 
 //////////////////////////////////////////////////
-ignition::math::Vector3d DirecToTension(const double _mag, const double _maxMag,
-  const ignition::math::Vector3d _Direc) const
+geometry_msgs::Vector3 DirecToTension(const double _mag, const double _maxMag,
+  const geometry_msgs::Vector3 _Direc) const
 {
-  ignition::math::Vector3d ten(0, 0, 0);  // tension
+  geometry_msgs::Vector3 ten(0, 0, 0);  // tension
   direc_unit = Normalize(_Direc)
   if (_mag >= 0.0)
   {
@@ -201,7 +201,7 @@ void UsvThrust::Update()
   }
 
   // Apply the thrust mapping
-  ignition::math::Vector3d tforcev(0, 0, 0);
+  geometry_msgs::Vector3 tforcev(0, 0, 0);
   tforcev = this->DirecToTension(this->boat.currMag, this->boat.maxMag,
                                     this->boat.Direc);
 

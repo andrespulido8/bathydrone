@@ -8,6 +8,7 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include "geometry_msgs/Vector3.h"
 
 #include <gazebo/common/CommonTypes.hh>
 #include <gazebo/common/Plugin.hh>
@@ -132,9 +133,9 @@ namespace gazebo
     /// \brief Takes ROS tension vector direction and mapps it to tension vector
     /// \param[in] _direc ROS direction
     /// \return force of tension vector.
-    private: ignition::math::Vector3d DirecToTension(const double _mag,
+    private: geometry_msgs::Vector3 DirecToTension(const double _mag,
                                    const double _maxMag,
-                                   ignition::math::Vector3d _Direc) const;
+                                   geometry_msgs::Vector3 _Direc) const;
 
 
     /// \brief A mutex to protect member variables accessed during

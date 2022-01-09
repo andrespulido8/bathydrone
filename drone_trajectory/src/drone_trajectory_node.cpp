@@ -10,7 +10,7 @@ int main(int argc, char **argv)
   // initialize node name
   ros::init(argc, argv, "drone_trajectory_node");
   ros::NodeHandle n;
-  ros::Publisher drone_traj_pub = n.advertise<geometry_msgs::Vector3>("drone_trajectory", 1000);
+  ros::Publisher drone_traj_pub = n.advertise<geometry_msgs::Vector3>("drone_trajectory", 1000);  //topic name
 
   ros::Rate loop_rate(10);
   int count = 0;
@@ -21,7 +21,7 @@ int main(int argc, char **argv)
 
   while (ros::ok())
   {
-    point.x = point.x + 0.1*count;
+    point.x = point.x + 0.0001*count;
     drone_traj_pub.publish(point);
 
     ros::spinOnce();
