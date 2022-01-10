@@ -1,14 +1,12 @@
 <plugin name="tension_plugin" filename="tension_plugin.so">
   <!-- General plugin parameters -->
-  <cmdTimeout>1.0</cmdTimeout>
-
   <boat>
-    <linkName>wamv/base_link</linkName>
-    <propJointName>left_engine_propeller_joint</propJointName>
-    <engineJointName>left_chasis_engine_joint</engineJointName>
-    <cmdTopic>tension_mag</cmdTopic>
-    <direcTopic>tension_direction</direcTopic>
-    <maxMag>10.0</maxMag>
+   <!-- General plugin parameters -->
+   <cmdTimeout>1.0</cmdTimeout>
+   <linkName>base_link</linkName>
+   <magTopic>tension_mag</magTopic>
+   <direcTopic>tension_direction</direcTopic>
+   <maxMag>10000000.0</maxMag>
   </boat>
 </plugin>
 
