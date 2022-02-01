@@ -1,0 +1,8 @@
+<? xml version="1.0"?>
+<robot xmlns:xacro="http://ros.org/wiki/xacro"
+       name="BATHYDRONE">
+  <!-- Include dynamics macros -->
+  <xacro:include filename="$(find tension_plugin)/src/tension_plugin.xacro" />
+
+</robot>
+

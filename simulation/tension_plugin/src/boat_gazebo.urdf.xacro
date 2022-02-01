@@ -1,0 +1,41 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://ros.org/wiki/xacro"
+       name="BATHYDRONE">
+  <xacro:arg name="locked" default="false" />
+  <!-- Note: this is only used for some sensors that do not correctly use the
+  robotNamespace parameter -->
+  <xacro:arg name="namespace" default="wamv"/>
+  <xacro:property name="namespace" value="$(arg namespace)" scope="global" />
+
+  <!-- === The BATHYDRONE (WAM_V) platform === -->
+  <xacro:include filename="$(find tension_plugin)/src/boat_gazebo.xacro"/>
+  
+  <!-- Decide if we lock the robot to the world === -->
+  <xacro:if value="$(arg locked)">
+    <gazebo>
+      <link name="wamv_external_link"/>
+      <joint name="wamv_external_pivot_joint" type="universal">
+        <parent>wamv::wamv/base_link</parent>
+        <child>wamv_external_link</child>
+        <axis>
+          <xyz>1 0 0</xyz>
+        </axis>
+        <axis2>
+          <xyz>0 1 0</xyz>
+        </axis2>
+      </joint>
+      <joint name="wamv_external_riser" type="prismatic">
+        <parent>world</parent>
+        <child>wamv_external_link</child>
+        <axis>
+          <limit>
+            <lower>-3</lower>
+            <upper>3</upper>
+          </limit>
+          <xyz>0 0 1</xyz>
+        </axis>
+      </joint>
+    </gazebo>
+  </xacro:if>
+
+</robot>

@@ -27,20 +27,24 @@ namespace gazebo
   {
     /// \brief Constructor
     /// \param[in] _parent Pointer to an SDF element to parse.
+    public: Boat() = default; 
     public: explicit Boat(Tension *_parent);
 
     
     /// TODO:fill out the topic message and data type 
     ///\brief Callback for new maginitude commands.
     /// \param[in] _msg The tension message to process.
-    public: void OnTensionMagnitude(const std_msgs::Float32::ConstPtr &_msg);
+    public: void OnTensionMagnitudeCB(const std_msgs::Float32::ConstPtr &_msg);
 
     /// \brief Callback for new tension direction commands.
-    /// \param[in] _msg The thrust e message to process.
-    public: void OnTensionDirection(const std_msgs::Float32::ConstPtr &_msg);
+    /// \param[in] _msg The directoin message to process.
+    public: void OnTensionDirectionCB(const geometry_msgs::Vector3::ConstPtr &_msg);
 
     /// \brief Maximum abs val of incoming Tension.
     public: double maxMag;
+
+    /// \brief Direction of Tension Vector
+    public: geometry_msgs::Vector3 currDirec;
 
     /// \brief Link where tension force is applied.
     public: physics::LinkPtr link;
@@ -57,8 +61,14 @@ namespace gazebo
     /// \brief Subscription to tension direction.
     public: ros::Subscriber direcSub;
 
-    /// \brief Current, most recent command //.
-    public: double currCmd;
+    /// \brief Current, most recent Magnitude.
+    public: double currMag;
+
+    /// \brief Application point of the force in the link at the body frame.
+    public: geometry_msgs::Point application_point;
+    public: double application_point_x;
+    public: double application_point_y;
+    public: double application_point_z;
 
     /// \brief Last time received a command via ROS topic.
     public: common::Time lastCmdTime;
@@ -68,6 +78,8 @@ namespace gazebo
 
     /// \brief Plugin parent pointer - for accessing world, etc.
     protected: Tension *plugin;
+    
+
   };
 
   /// \brief A plugin to simulate a tension force applied to a model.
@@ -91,17 +103,23 @@ namespace gazebo
   ///    <plugin name="example" filename="libusv_gazebo_thrust_plugin.so">
   ///      <!-- General plugin parameters -->
   ///      <cmdTimeout>1.0</cmdTimeout>
-  ///
+  ///      <publisherRate>1.0</publisherRate>
   ///      <boat>
-  ///        <linkName>boat_top</linkName>
+  ///        <linkName>base_link</linkName>
   ///        <magTopic>tension_mag</magTopic>
   ///        <direcTopic>tension_direction</direcTopic>
   ///        <maxMag>10.0</maxMag>
+  ///        <applicationPointX>0</applicationPointX>
+  ///        <applicationPointY>0</applicationPointY>
+  ///        <applicationPointZ>0</applicationPointZ>
   ///      </boat>
   ///    </plugin>
 
   class Tension : public ModelPlugin //replacing UsvThrust
   {
+    /// \brief Vector of boat instances.
+    public: Boat boat;
+
     /// \brief Constructor.
     public: Tension() = default;
 
@@ -130,7 +148,7 @@ namespace gazebo
     /// \return force of tension vector.
     private: geometry_msgs::Vector3 DirecToTension(const double _mag,
                                    const double _maxMag,
-                                   geometry_msgs::Vector3 _Direc) const;
+                                   geometry_msgs::Vector3 _currDirec);
 
 
     /// \brief A mutex to protect member variables accessed during
@@ -139,6 +157,9 @@ namespace gazebo
 
     /// \brief The ROS node handler used for communications.
     private: std::unique_ptr<ros::NodeHandle> rosnode;
+
+    // comment
+    public: geometry_msgs::Vector3 direc_unit;
 
     /// important
     /// \brief Pointer to the Gazebo world, retrieved when the model is loaded.
@@ -159,6 +180,7 @@ namespace gazebo
 
     /// \brief The last time we publish joints.
     private: common::Time prevUpdateTime;
+
   };
 }
 

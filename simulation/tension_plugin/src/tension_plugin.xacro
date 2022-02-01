@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+  <xacro:macro name="tension_plugin" params="name width:=2.4 length:=4.9">
+    <!--Gazebo Plugin for applying tension forcce to models. TODO: remove width length-->
+    <gazebo>
+    <plugin name="tension_plugin" filename="tension_plugin.so">
+      <!-- General plugin parameters -->
+      <cmdTimeout>1.0</cmdTimeout>
+      <boat>
+        <linkName>base_link</linkName>
+        <magTopic>tension_mag</magTopic>
+        <direcTopic>tension_direction</direcTopic>
+        <maxMag>10000000.0</maxMag>
+      </boat>
+    </plugin>
+    </gazebo>
+  </xacro:macro>
+</robot>
+
