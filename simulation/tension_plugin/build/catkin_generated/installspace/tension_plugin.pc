@@ -1,8 +1,0 @@
-prefix=/usr/local
-
-Name: tension_plugin
-Description: Description of tension_plugin
-Version: 0.0.0
-Cflags: 
-Libs: -L${prefix}/lib 
-Requires: 

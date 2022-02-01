@@ -1,8 +1,0 @@
-prefix=/home/andrespulido8/april_ws/src/bathydrone/simulation/tension_plugin/build/devel
-
-Name: tension_plugin
-Description: Description of tension_plugin
-Version: 0.0.0
-Cflags: 
-Libs: -L${prefix}/lib 
-Requires: 
