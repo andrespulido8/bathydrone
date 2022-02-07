@@ -24,25 +24,29 @@ Boat::Boat(Tension *_parent) {
 //////////////////////////////////////////////////
 void Boat::OnTensionMagnitudeCB(const std_msgs::Float32::ConstPtr &_msg) {
   // When we get a new magnitude!
-  ROS_INFO_STREAM("New magnitude command from magTopic! "
-                  << _msg->data); // change to DEBUG
+  ROS_DEBUG_STREAM("New magnitude command from magTopic! "
+                  << _msg->data);
   std::lock_guard<std::mutex> lock(this->plugin->mutex);
 #if GAZEBO_MAJOR_VERSION >= 8
   this->lastCmdTime = this->plugin->world->SimTime();
 #else
   this->lastCmdTime = this->plugin->world->GetSimTime();
 #endif
-  this->currMag = boost::algorithm::clamp(_msg->data, -this->maxMag,
+  if (_msg->data > this->maxMag) 
+  {
+    ROS_WARN_STREAM("Magnitude of " << _msg->data << " higher than max magnitude of: " << this->maxMag ); 
+  }
+  this->currMag = boost::algorithm::clamp(_msg->data, 0,
                                           this->maxMag); // bounds magnitude
 }
 
 //////////////////////////////////////////////////
 void Boat::OnTensionDirectionCB(const geometry_msgs::Vector3::ConstPtr &_msg) {
-  // When we get a new thrust angle!
-  ROS_INFO("New tension direction from direcTopic!");
-  ROS_INFO_STREAM(
+  // Callback when we get a new tension direction
+  ROS_DEBUG("New tension direction from direcTopic!");
+  ROS_DEBUG_STREAM(
       " this is the x value:  "
-      << _msg->x); // change to DEBUG
+      << _msg->x);
 
   // std::lock_guard<std::mutex> lock(this->plugin->mutex);
   this->currDirec = *_msg;
@@ -62,22 +66,20 @@ double Tension::SdfParamDouble(sdf::ElementPtr _sdfPtr,
   }
 
   double val = _sdfPtr->Get<double>(_paramName);
-  // ROS_INFO("Parameter found - setting <" << _paramName << "> to <" << val
-  //                                       << ">."); // change to DEBUG
   return val;
 }
 
 //////////////////////////////////////////////////
 void Tension::Load(physics::ModelPtr _parent, sdf::ElementPtr _sdf) {
-  ROS_INFO("Loading tension_plugin"); // change to DEBUG
+  ROS_DEBUG("Loading tension_plugin"); 
   this->model = _parent;              // important
   this->world = this->model->GetWorld();
 
-  // Get parameters from SDF
+  // Get parameters from SDF  TODO: investigate why there is no namespace
   std::string nodeNamespace = "";
   if (_sdf->HasElement("robotNamespace")) {
     nodeNamespace = _sdf->Get<std::string>("robotNamespace") + "/";
-    ROS_INFO_STREAM("Tension namespace <" << nodeNamespace << ">");
+    ROS_DEBUG_STREAM("Tension namespace <" << nodeNamespace << ">");
   }
 
   this->cmdTimeout = this->SdfParamDouble(_sdf, "cmdTimeout", 1.0);
@@ -157,14 +159,14 @@ void Tension::Load(physics::ModelPtr _parent, sdf::ElementPtr _sdf) {
 }
 
 //////////////////////////////////////////////////
-geometry_msgs::Vector3
-Tension::DirecToTension(const double _mag, const double _maxMag,
+geometry_msgs::Vector3 Tension::DirecToTension(const double _mag,
                         geometry_msgs::Vector3 _currDirec) {
-
-  ROS_INFO_STREAM("Current direction x: " << _currDirec.x);
-  geometry_msgs::Vector3 tension; // initialize tension
+  // Maps the current direction to the tension vector
+  
+  geometry_msgs::Vector3 tension; 
+  
   double norm = sqrt(pow(_currDirec.x,2)+pow(_currDirec.y,2)+pow(_currDirec.z,2));
-  if (norm == 0)
+  if (norm == 0) //TODO: do this more cleanly with a check for empty vector
   {
     direc_unit.x = 0;
     direc_unit.y = 0;
@@ -178,19 +180,10 @@ Tension::DirecToTension(const double _mag, const double _maxMag,
   }
   if (_mag >= 0.0)
   {
-    if (_mag > _maxMag)
-    {
-      ROS_WARN_STREAM("Magnitude of tension exceeding" << _maxMag);
-    }
-    ROS_INFO_STREAM("Unit vector direction x =" << direc_unit.x);
-    double minimum = std::min(_mag, _maxMag);
-    tension.x = minimum * direc_unit.x;
-    tension.y = minimum * direc_unit.y;
-    tension.z = minimum * direc_unit.z;
-    ROS_INFO_STREAM("Tension vector! This is the x "
-                    "component of the force: "
-                    << tension.x);
-    
+    tension.x = _mag * direc_unit.x;
+    tension.y = _mag * direc_unit.y;
+    tension.z = _mag * direc_unit.z;
+  //TODO: publish the tension to a topic for visualization purposes
   }
   else
   {
@@ -214,25 +207,18 @@ void Tension::Update() {
     this->boat.currMag = 0.0;
     ROS_DEBUG_STREAM_THROTTLE(1.0, "Magnitude Cmd Timeout");
   }
-  ROS_INFO_STREAM("Applying the tension mapping! Current x direc is :" << this->boat.currDirec.x);
+  
   // Apply the tension mapping
   geometry_msgs::Vector3 tforcev;
-  tforcev = this->DirecToTension(this->boat.currMag, this->boat.maxMag,
+  tforcev = this->DirecToTension(this->boat.currMag,
                                  this->boat.currDirec);
-
-  // geometry_msgs::Point application_point(0, 0, 0);
+  ROS_DEBUG_STREAM("Tension applied: " << tforcev);
   ignition::math::Vector3d application_point_gazebo(this->boat.application_point_x, this->boat.application_point_y, this->boat.application_point_z);
 
   ignition::math::Vector3d tforcev_gazebo(tforcev.x, tforcev.y, tforcev.z);
-  // tforcev_gazebo.X() = tforcev.x;
-  // tforcev_gazebo.Y() = tforcev.y;
-  // tforcev_gazebo.Z() = tforcev.z;
 
   this->boat.link->AddForceAtRelativePosition(tforcev_gazebo,
                                               application_point_gazebo);
-  // virtual void gazebo::physics::Link::AddForceAtRelativePosition(const
-  // math::Vector3 &_tforcev, const math::Point &_application_point)
-  ROS_INFO("Force applied to link!!!");
 }
 
 GZ_REGISTER_MODEL_PLUGIN(Tension);

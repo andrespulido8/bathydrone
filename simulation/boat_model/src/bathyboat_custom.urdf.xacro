@@ -1,10 +1,10 @@
 <?xml version="1.0"?>
-<robot name="navigator" xmlns:xacro="http://ros.org/wiki/xacro">
+<robot name="bathydrone" xmlns:xacro="http://ros.org/wiki/xacro">
   <!-- Defines the base vehicle -->
   <xacro:include filename="$(find vrx_gazebo)/../wamv_description/urdf/wamv_base.urdf.xacro" />
 
-  <!-- Attach hydrodynamics plugin -->
-  <xacro:include filename="$(find vrx_gazebo)/../wamv_gazebo/urdf/macros.xacro" />
-  <xacro:usv_dynamics_gazebo name="wamv_dynamics_plugin"/>
-                                                                                                                                                                                                                1,1           Top
+  <!-- Attach tension and hydrodynamics plugin -->
+  <xacro:include filename="include_tension_to_model.xacro"/>
+  <xacro:include filename="$(find wamv_gazebo)/urdf/dynamics/wamv_gazebo_dynamics_plugin.xacro"/>
+                                                                                                                                                                                                            1,1           Top
 </robot>

@@ -8,11 +8,14 @@ project(tension_plugin)
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
-  drone_trajectory
-  roscpp
+  drone_trajectory 
+  roscpp REQUIRED
   rospy
+  std_msgs REQUIRED
+  geometry_msgs
+  gazebo REQUIRED
 )
-
+include_directories(${GAZEBO_INCLUDE_DIRS})
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
 
@@ -103,9 +106,9 @@ find_package(catkin REQUIRED COMPONENTS
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES tension_plugin
-#  CATKIN_DEPENDS drone_trajectory roscpp rospy
+  INCLUDE_DIRS include
+  LIBRARIES tension_plugin
+  CATKIN_DEPENDS drone_trajectory roscpp rospy
 #  DEPENDS system_lib
 )
 
@@ -115,15 +118,19 @@ catkin_package(
 
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
-include_directories(
-# include
+include_directories(include
   ${catkin_INCLUDE_DIRS}
+
+  ${std_msgs_INCLUDE_DIRS}
+  ${geometry_msgs_INCLUDE_DIRS}
 )
 
 ## Declare a C++ library
-# add_library(${PROJECT_NAME}
-#   src/${PROJECT_NAME}/tension_plugin.cpp
-# )
+add_library(tension_plugin
+  src/tension_plugin.cc
+)
+## or add_library(${PROJECT_NAME} ${${PROJECT_NAME}_SRCS})
+
 
 ## Add cmake target dependencies of the library
 ## as an example, code may need to be generated before libraries
@@ -146,9 +153,11 @@ include_directories(
 # add_dependencies(${PROJECT_NAME}_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Specify libraries to link a library or executable target against
-# target_link_libraries(${PROJECT_NAME}_node
-#   ${catkin_LIBRARIES}
-# )
+target_link_libraries(tension_plugin
+  ${catkin_LIBRARIES}
+  ${GAZEBO_LIBRARIES}
+  #${PROJECT_SOURCE_DIR}/lib/tension_plugin.so
+)
 
 #############
 ## Install ##
@@ -162,8 +171,7 @@ include_directories(
 # catkin_install_python(PROGRAMS
 #   scripts/my_python_script
 #   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-# )
-
+#)
 ## Mark executables for installation
 ## See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_executables.html
 # install(TARGETS ${PROJECT_NAME}_node

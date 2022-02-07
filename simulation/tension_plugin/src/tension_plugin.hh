@@ -147,7 +147,6 @@ namespace gazebo
     /// \param[in] _direc ROS direction
     /// \return force of tension vector.
     private: geometry_msgs::Vector3 DirecToTension(const double _mag,
-                                   const double _maxMag,
                                    geometry_msgs::Vector3 _currDirec);
 
 

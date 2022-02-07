@@ -225,9 +225,9 @@
         <magTopic>tension_mag</magTopic>
         <direcTopic>tension_direction</direcTopic>
         <maxMag>10000000.0</maxMag>
-        <applicationPointX>0</applicationPointX>
+        <applicationPointX>0.5</applicationPointX>
         <applicationPointY>0</applicationPointY>
-        <applicationPointZ>0</applicationPointZ>
+        <applicationPointZ>0.5</applicationPointZ>
       </boat>
     </plugin>
   </gazebo>

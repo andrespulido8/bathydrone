@@ -1,6 +1,0 @@
-# Generate NaviGator's URDF
-xacro_add_files(
-  urdf/navigator.urdf.xacro
-  INORDER INSTALL DESTINATION urdf
-  TARGET xacro_urdf
-)
