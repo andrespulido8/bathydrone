@@ -224,8 +224,8 @@
         <linkName>wamv/base_link</linkName>
         <magTopic>tension_mag</magTopic>
         <direcTopic>tension_direction</direcTopic>
-        <maxMag>10000000.0</maxMag>
-        <applicationPointX>0.5</applicationPointX>
+        <maxMag>10000.0</maxMag>
+        <applicationPointX>1</applicationPointX>
         <applicationPointY>0</applicationPointY>
         <applicationPointZ>0.5</applicationPointZ>
       </boat>

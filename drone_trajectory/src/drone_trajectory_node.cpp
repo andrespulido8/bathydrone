@@ -13,16 +13,16 @@ int main(int argc, char **argv)
   ros::Rate loop_rate(10);
   int count = 0;
   std_msgs::Float32 magnitude;
-  magnitude.data = 1000.0;
+  magnitude.data = 800.0;
   geometry_msgs::Vector3 point;
-  point.x = -532;
+  point.x = 0;
   point.y = 162;
   point.z = 2;
 
   while (ros::ok())
   {
-    point.x = point.x + 0.0001*count;
-    point.y = point.y - 0.00001*count;
+    point.x = point.x - 0.0001*count;
+    point.y = point.y + 0.001*count;
     
     drone_traj_pub.publish(point);
     drone_tension_mag_pub.publish(magnitude);
