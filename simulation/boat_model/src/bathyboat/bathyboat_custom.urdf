@@ -10,14 +10,15 @@
     <parent link="wamv/base_link"/>
     <child link="wamv/dummy_link"/>
   </joint>
-  <!-- Basic model of the 16' WAM-V USV -->
+  <!-- Basic model of the BAthy-Drone -->
   <link name="wamv/dummy_link">
     <visual>
       <geometry>
-        <mesh filename="package://wamv_description/models/WAM-V-Base/mesh/WAM-V-Base.dae"/>
+        <mesh filename="package://boat_model/CAD/bathydrone.dae"/>
       </geometry>
     </visual>
     <!-- Main float -->
+    <!-- TODO: change collision parameters -->
     <collision name="left_float">
       <origin rpy="0 1.57 0" xyz="-0.4 1.03 0.2"/>
       <geometry>
@@ -180,8 +181,8 @@
     </collision>
     <inertial>
       <!-- From WAM-V spec sheet -->
-      <mass value="180.0"/>
-      <inertia ixx="120.0" ixy="0.0" ixz="0.0" iyy="393" iyz="0.0" izz="446.0"/>
+      <mass value="6.342"/>
+      <inertia ixx="0.104" ixy="0.0" ixz="0.0" iyy="12.48" iyz="0.0" izz="0.024"/>
     </inertial>
   </link>
   <!--Gazebo Plugin for simulating WAM-V dynamics-->
@@ -196,22 +197,22 @@
       <yDotV>0.0</yDotV>
       <nDotR>0.0</nDotR>
       <!-- Linear and quadratic drag -->
-      <xU>51.3</xU>
-      <xUU>72.4</xUU>
-      <yV>40.0</yV>
+      <xU>3.76 51.3</xU>
+      <xUU>5 72.4</xUU>
+      <yV>3 40.0</yV>
       <yVV>0.0</yVV>
-      <zW>500.0</zW>
-      <kP>50.0</kP>
-      <mQ>50.0</mQ>
-      <nR>400.0</nR>
+      <zW>30.0</zW>
+      <kP>3.5</kP>
+      <mQ>3.6.0</mQ>
+      <nR>25.0</nR>
       <nRR>0.0</nRR>
       <!-- General dimensions -->
       <!--<boatArea>2.2</boatArea>-->
       <hullRadius>0.213</hullRadius>
-      <boatWidth>2.4</boatWidth>
-      <boatLength>4.9</boatLength>
+      <boatWidth>0.5</boatWidth>
+      <boatLength>1</boatLength>
       <!-- Length discretization, AKA, "N" -->
-      <length_n>2</length_n>
+      <length_n>0.5</length_n>
       <!-- Wave model -->
       <wave_model>ocean_waves</wave_model>
     </plugin>
@@ -227,7 +228,7 @@
         <maxMag>10000.0</maxMag>
         <applicationPointX>1</applicationPointX>
         <applicationPointY>0</applicationPointY>
-        <applicationPointZ>0.5</applicationPointZ>
+        <applicationPointZ>0.2</applicationPointZ>
       </boat>
     </plugin>
   </gazebo>
