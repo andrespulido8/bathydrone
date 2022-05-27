@@ -25,6 +25,8 @@ Then clone the repo:
 (the --recurse-submodules is essential, as that is what pulls the submodules, -j8 is a speed optimization that downloads up to 8 submodules at a time)
 
 	git clone --recurse-submodules -j8 git@github.com:andrespulido8/bathydrone.git
+Update submodules
+	git submodule update --init --recursive
 
 # Gazebo 
 
@@ -52,3 +54,6 @@ Test gazebo with ROS
 
 	roscore &
 	rosrun gazebo_ros gazebo
+
+Run the bathydrone simulation
+	roslaunch bathylaunch bathylaunch.launch
