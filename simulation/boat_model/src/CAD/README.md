@@ -1,0 +1,1 @@
+Origin is currently in the best gues of location for the Center of Mass of the boat. To change this, go to the blender model and select object in the top left of the scree, and click on set origin. There are many ways to move it. You can see https://www.youtube.com/watch?v=9bxOKHx2VuU or google "How to move origin point in blender"

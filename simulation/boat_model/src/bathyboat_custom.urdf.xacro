@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <robot name="bathydrone" xmlns:xacro="http://ros.org/wiki/xacro">
   <!-- Defines the base vehicle -->
-  <xacro:include filename="$(find vrx_gazebo)/../wamv_description/urdf/wamv_base.urdf.xacro" />
+  <xacro:include filename="$(find boat_model)/src/bathyboat/bathyboat_base.urdf.xacro" />
 
   <!-- Attach tension and hydrodynamics plugin -->
   <xacro:include filename="include_tension_to_model.xacro"/>

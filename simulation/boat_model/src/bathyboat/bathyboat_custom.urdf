@@ -14,7 +14,7 @@
   <link name="wamv/dummy_link">
     <visual>
       <geometry>
-        <mesh filename="package://wamv_description/models/WAM-V-Base/mesh/WAM-V-Base.dae"/>
+        <mesh filename="package://boat_model/src/CAD/bathydrone.dae"/>
       </geometry>
     </visual>
     <!-- Main float -->
