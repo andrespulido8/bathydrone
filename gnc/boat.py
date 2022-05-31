@@ -56,10 +56,10 @@ Iz =  4  # mass moment of intertia from SolidWorks
 tension_magnitudes = [9, 12, 18, 27.5]
 
 # Fluid inertial effects
-wm_xu = -0.025*m  # kg          # These expressions are just an okay starting point
-wm_yv = -0.25*m  # kg           # if all you somewhat know are m, Iz, and xg
+wm_xu = -4*m  # kg        Increase to damp more the yaw wrt to drone 
+wm_yv = -0.25*m  # kg       #    
 wm_yr = -0.25*m*xg  # kg*m
-wm_nr = -0.25*Iz  # kg*m**2
+wm_nr = -0.25*Iz  # kg*m**2  #
 
 # Drag
 d_xuu = -3.5 #0.25 * wm_xu  # N/(m/s)**2
@@ -70,9 +70,9 @@ d_nrr = -4 #0.25 * (wm_nr + wm_yr)  # (N*m)/(rad/s)**2
 d_yrr = 0.25 * wm_yr  # N/(rad/s)**2
 d_yrv = 0.25 * wm_yr  # N/(m*rad/s**2)
 d_yvr = 0.25 * wm_yv  # N/(m*rad/s**2)
-d_nvv = 0.25 * d_yvv  # (N*m)/(m/s)**2
-d_nrv = 0.25 * d_yrv  # (N*m)/(m*rad/s**2)
-d_nvr = 0.25 * (wm_nr + wm_yv)  # (N*m)/(m*rad/s**2)
+d_nvv = 0.25 * d_yvv  # (N*m)/(m/s)**2  #
+d_nrv = 0.25 * d_yrv  # (N*m)/(m*rad/s**2)  #
+d_nvr = 0.25 * (wm_nr + wm_yv)  # (N*m)/(m*rad/s**2)  #
 
 # EQUATIONS OF MOTION
 
@@ -107,7 +107,8 @@ def dynamics(q, u):
     R = get_R(q)
 
     # M*vdot + C*v + D*v = u  and  pdot = R*v
-    return np.concatenate((R.dot(q[3:]), Minv.dot(u - (C + D).dot(q[3:]))))
+    dyn = np.concatenate((R.dot(q[3:]), Minv.dot(u - (C + D).dot(q[3:]))))
+    return dyn
 
 def unwrap(ang):
     "Returns an angle on [-pi, pi]"
@@ -162,10 +163,10 @@ if __name__ == "__main__":
     # Simulation duration, timestep and animation parameters
     t0 = 0
     if path_type == 'line':
-        T = 20  # s
+        T = 60  # s
         dt = 0.001
     elif path_type == 'data':
-        T = 200  # df['time1'].to_numpy()[-1]
+        T = df['time1'].to_numpy()[-1]
         dt = 0.01
 
     framerate = 20  # fps
@@ -196,6 +197,7 @@ if __name__ == "__main__":
     dr_history = np.zeros((len(t_arr), int(len(q)/2)))
     u_history = np.zeros((len(t_arr), int(len(q)/2)))
     u_world_history = np.zeros((len(t_arr), int(len(q)/2)))
+    head_dr = np.zeros((len(t_arr)))
 
     # Integrate dynamics using first-order forward stepping
     for i, t in enumerate(t_arr):
@@ -215,18 +217,21 @@ if __name__ == "__main__":
         moments = np.cross(r, ten_body)
         u[:2] = ten_body[:2]
         u[2] = moments[2]  # apply moment about z
-        if npl.norm(q[:2] - dr[:2]) < proj_le-3:
+        #err_or = np.arctan2(diff_pos[1],diff_pos[0]) - q[2]
+        #ten[2] = err_or*np.abs(moments[2])  # apply moment about z
+        if npl.norm(q[:2] - dr[:2]) < proj_le-2:
             u = np.array([0, 0, 0])
 
-        #if t > 0.373:
-            # print('aha')
+        #if t > 5:
+        #    print('aha')
             # break
 
         # Record this instant
         q_history[i] = q
         dr_history[i] = dr
         u_history[i] = u
-        u_world_history[i] = R.dot(u)
+        u_world_history[i] = ten
+        head_dr[i] = np.degrees(np.arctan2(diff_pos[1],diff_pos[0]))
 
         # Step forward, qnext = qlast + qdot*dt
         q = qplus(q, dynamics(q, u)*dt)
@@ -252,11 +257,13 @@ if __name__ == "__main__":
             t_arr, dr_history[:, 1], 'b')
     ax.grid(True)
 
-    # Plot yaw position
+    # Plot orientation
     ax = fig1.add_subplot(fig1rows, fig1cols, 3)
     ax.set_title('Heading (deg)', fontsize=16)
     ax.plot(t_arr, np.rad2deg(q_history[:, 2]), 'g',)
+    ax.plot(t_arr, head_dr, 'k', label='heading from boat to drone')
     ax.grid(True)
+    ax.legend()
 
     # Plot control efforts
     ax = fig1.add_subplot(fig1rows, fig1cols, 4)
@@ -288,11 +295,14 @@ if __name__ == "__main__":
     ax.set_xlabel('Time (s)')
     ax.grid(True)
 
-    # Plot norm linearization errors
+    # Wrench in world frame
     ax = fig1.add_subplot(fig1rows, fig1cols, 5)
-    ax.set_title('Norm Wrench', fontsize=16)
-    ax.plot(t_arr, npl.norm(u_history, axis=1), 'b', label='x [N]')
+    ax.set_title('World Wrench [N, N, Nm]', fontsize=16)
+    ax.plot(t_arr, u_world_history[:, 0], 'b', label='x [N]')
+    ax.plot(t_arr, u_world_history[:, 1], 'g', label='y [N]')
+    ax.plot(t_arr, u_world_history[:, 2], 'r', label='z [N m]')
     ax.set_xlabel('Time (s)')
+    ax.legend()
     ax.grid(True)
 
     # Dist drone and boat
