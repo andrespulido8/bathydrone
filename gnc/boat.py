@@ -36,13 +36,18 @@ if path_type == 'data':
     echo_6_051722 = pd.read_csv('./traj_data/force_traj_6.csv')
     echo_9_051722 = pd.read_csv('./traj_data/force_traj_9.csv')
     echo_12_051722 = pd.read_csv('./traj_data/force_traj_12.csv')
+    drone_3 = pd.read_csv('./traj_data/drone_traj_3.csv')
+    drone_6 = pd.read_csv('./traj_data/drone_traj_6.csv')
+    drone_9 = pd.read_csv('./traj_data/drone_traj_9.csv')
+    drone_12 = pd.read_csv('./traj_data/drone_traj_12.csv')
     echos = [echo_3_051722, echo_6_051722, echo_9_051722, echo_12_051722]
+    drones = [drone_3, drone_6, drone_9, drone_12]
 
 # PHYSICAL PARAMETERS
 
 # Offset on the tension application point [m]
-off_x = 0.2
-off_z = 0.05
+off_x = 0.1905  # measured from the bathydrone vehicle
+off_z = 0.1016
 r = np.array([off_x, 0, off_z])
 # height of drone above water
 hd = 20*0.681818  # feet to meters
@@ -53,7 +58,7 @@ proj_le = np.sqrt(le**2-hd**2)
 m = 6.342  # kg
 xg = 0  # COM x coord in bocy fixed frame [m]
 Iz =  4  # mass moment of intertia from SolidWorks 
-tension_magnitudes = [9, 12, 18, 27.5]
+tension_magnitudes = [9, 11, 18, 27.5]
 
 # Fluid inertial effects
 wm_xu = -4*m  # kg        Increase to damp more the yaw wrt to drone 
@@ -126,6 +131,22 @@ def qminus(ql, qr):
     dq[2] = unwrap(dq[2])
     return dq
 
+def get_boat_position(t, ii):
+    """Return the position of the boat in a point in time
+       Path types:
+            'line' = empty
+            'data' = get the trajectory from a csv"""
+    if path_type == 'line':
+        return np.array([0, 0, 0])
+    elif path_type == 'data':
+        t_i = df_dr['time'].iloc[ii]
+        while t_i <= t:
+            t_i = df_dr['time'].iloc[ii]
+            ii += 1
+        x = df_bt['X_m'].iloc[ii]
+        y = df_bt['Y_m'].iloc[ii]
+        return np.array([x, y, 0]), ii
+
 def get_drone_position(t, hd, ii):
     """Return the position of the drone in a point in time,
        depending on the desired velocity
@@ -135,12 +156,12 @@ def get_drone_position(t, hd, ii):
     if path_type == 'line':
         return np.array([0.7*t, 0.7*t, hd]), 0
     elif path_type == 'data':
-        t_i = df['time1'].iloc[ii]
-        while t_i <= t_last:
-            t_i = df['time1'].iloc[ii]
+        t_i = df_dr['time'].iloc[ii]
+        while t_i <= t:
+            t_i = df_dr['time'].iloc[ii]
             ii += 1
-        x = df['X_m'].iloc[ii]
-        y = df['Y_m'].iloc[ii]
+        x = df_dr['X_m'].iloc[ii]
+        y = df_dr['Y_m'].iloc[ii]
         return np.array([x, y, hd]), ii
 
 def get_R(q):
@@ -155,9 +176,17 @@ def get_R(q):
 if __name__ == "__main__":
 
     if path_type == 'data':
-        df = echos[0]
-    ten_mag = tension_magnitudes[0]
+        df_dr = drones[1]
+        df_bt = echos[1]
+
+        # Fix delta in time
+        #kk = np.argmax(df_dr['Y_m'].to_numpy() <= df_bt['Y_m'].to_numpy()[0])
+        #tt = df_dr["time"].to_numpy()[80]
+        df_dr["time"] = df_dr["time"] - df_dr["time"].to_numpy()[76]
+        df_dr = df_dr.drop(df_dr.index[range(0, 76)])
+    ten_mag = tension_magnitudes[1]
     i_last = 0
+    ii_last = 0
     t_last = 0
 
     # Simulation duration, timestep and animation parameters
@@ -166,7 +195,7 @@ if __name__ == "__main__":
         T = 60  # s
         dt = 0.001
     elif path_type == 'data':
-        T = df['time1'].to_numpy()[-1]
+        T = np.min([df_bt['time1'].to_numpy()[-1],df_dr['time'].to_numpy()[-1]])
         dt = 0.01
 
     framerate = 20  # fps
@@ -176,14 +205,16 @@ if __name__ == "__main__":
 
     # Initial condition
     # [m, m, rad, m/s, m/s, rad/s]
-    x0 = -1
+    x0 = -14
     if path_type == 'line':
         q0 = np.array([x0, -np.sqrt(proj_le**2 - x0**2),
                        0, 0, 0, 0], dtype=np.float64)
     elif path_type == 'data':
-        jj = np.argmax(df['time1'].to_numpy() >= t0)
-        q0 = np.array([x0 + df['X_m'].iloc[jj],
-                np.sqrt(proj_le**2 - x0**2) + df['Y_m'].iloc[jj],
+        jj = np.argmax(df_dr['time'].to_numpy() >= t0)
+        #q0 = np.array([x0 + df_dr['X_m'].iloc[jj],
+        #        np.sqrt(proj_le**2 - x0**2) + df_dr['Y_m'].iloc[jj],
+        #        0, 0, 0, 0], dtype=np.float64)
+        q0 = np.array([df_bt['X_m'].iloc[jj], df_bt['Y_m'].iloc[jj],
                 0, 0, 0, 0], dtype=np.float64)
     q = np.copy(q0)
     u = np.array([0, 0, 0], dtype=np.float64)  # [N, N, N*m]
@@ -195,6 +226,7 @@ if __name__ == "__main__":
     # Preallocate results memory
     q_history = np.zeros((len(t_arr), len(q)))
     dr_history = np.zeros((len(t_arr), int(len(q)/2)))
+    bt_history = np.zeros((len(t_arr), int(len(q)/2)))
     u_history = np.zeros((len(t_arr), int(len(q)/2)))
     u_world_history = np.zeros((len(t_arr), int(len(q)/2)))
     head_dr = np.zeros((len(t_arr)))
@@ -205,10 +237,11 @@ if __name__ == "__main__":
         # Tension input
         R = get_R(q)
         x = npl.norm(q[:2] - dr[:2])
-        if x < proj_le + 0.5 or t == 0.0:
+        if x <= proj_le or t == 0.0:
             dr, i_last = get_drone_position(t_last, hd, i_last)
             t_last += dt
-        app_point = np.array([q[0], q[1], 0]) + R.dot(r) # wolrd coord
+        
+        app_point = np.array([q[0], q[1], 0]) + R.dot(r) # world coord
         diff_pos = dr - app_point
         diff_pos = diff_pos/npl.norm(diff_pos)
 
@@ -217,21 +250,23 @@ if __name__ == "__main__":
         moments = np.cross(r, ten_body)
         u[:2] = ten_body[:2]
         u[2] = moments[2]  # apply moment about z
-        #err_or = np.arctan2(diff_pos[1],diff_pos[0]) - q[2]
-        #ten[2] = err_or*np.abs(moments[2])  # apply moment about z
+        ten[2] = moments[2]
+        
         if npl.norm(q[:2] - dr[:2]) < proj_le-2:
             u = np.array([0, 0, 0])
 
-        #if t > 5:
-        #    print('aha')
-            # break
+        br, ii_last = get_boat_position(t, ii_last)
 
+        #if q[1] <= df_bt['Y_m'].to_numpy()[0]:
+        #    print(i)
         # Record this instant
+
         q_history[i] = q
         dr_history[i] = dr
         u_history[i] = u
         u_world_history[i] = ten
         head_dr[i] = np.degrees(np.arctan2(diff_pos[1],diff_pos[0]))
+        bt_history[i] = br 
 
         # Step forward, qnext = qlast + qdot*dt
         q = qplus(q, dynamics(q, u)*dt)
@@ -247,6 +282,7 @@ if __name__ == "__main__":
     ax.set_title('X Position (m)', fontsize=16)
     ax.plot(t_arr, q_history[:, 0], 'g', label="nonlinear")
     ax.plot(t_arr, dr_history[:, 0], 'b', label="drone")
+    if path_type == 'data': ax.plot(t_arr, bt_history[:,0], 'k', label='boat')
     ax.grid(True)
     ax.legend()
 
@@ -255,6 +291,7 @@ if __name__ == "__main__":
     ax.set_title('Y Position (m)', fontsize=16)
     ax.plot(t_arr, q_history[:, 1], 'g',
             t_arr, dr_history[:, 1], 'b')
+    if path_type == 'data': ax.plot(t_arr, bt_history[:,1], 'k')
     ax.grid(True)
 
     # Plot orientation
@@ -301,6 +338,8 @@ if __name__ == "__main__":
     ax.plot(t_arr, u_world_history[:, 0], 'b', label='x [N]')
     ax.plot(t_arr, u_world_history[:, 1], 'g', label='y [N]')
     ax.plot(t_arr, u_world_history[:, 2], 'r', label='z [N m]')
+    ax.grid(True)
+
     ax.set_xlabel('Time (s)')
     ax.legend()
     ax.grid(True)
@@ -325,6 +364,7 @@ if __name__ == "__main__":
     ax.grid(True)
     plt.show()
 
+
     # Figure for animation
     fig6 = plt.figure()
     fig6.suptitle('Evolution')
@@ -344,11 +384,13 @@ if __name__ == "__main__":
     pref = ax6.scatter(dr_history[0, 0], dr_history[0, 1], color='b', s=pthick)
     href = ax6.plot([dr_history[0, 0], dr_history[0, 0] - 0.8*llen*u_world_history[0, 0]],
                     [dr_history[0, 1], dr_history[0, 1] - 0.8*llen*u_world_history[0, 1]], color='r', linewidth=lthick)
+    pact = ax6.scatter(bt_history[0, 0], bt_history[0, 1], color='c', s=pthick)
 
     # Plot entirety of actual trajectory
     if outline_path:
         ax6.plot(q_history[:, 0], q_history[:, 1], 'k--',
-                 dr_history[:, 0], dr_history[:, 1], 'g--')
+                 dr_history[:, 0], dr_history[:, 1], 'g--',
+                 bt_history[:, 0], bt_history[:, 1], 'm--')
 
     # Function for updating the animation frame
 
@@ -365,6 +407,7 @@ if __name__ == "__main__":
         pref.set_offsets((dr_history[i, 0], dr_history[i, 1]))
         href[0].set_data([dr_history[i, 0], dr_history[i, 0] - 0.8*llen*u_world_history[i, 0]],
                          [dr_history[i, 1], dr_history[i, 1] - 0.8*llen*u_world_history[i, 1]])
+        pact.set_offsets((bt_history[i, 0], bt_history[i, 1]))
 
         ii[0] += int(1 / (dt * framerate))
         if ii[0] >= len(t_arr):
@@ -372,7 +415,7 @@ if __name__ == "__main__":
             ii[0] = 0
 
         else:
-            return [p, h, pref, href]
+            return [p, h, pref, href, pact]
 
     # Run animation
     ani = animation.FuncAnimation(
@@ -402,3 +445,29 @@ if __name__ == "__main__":
                 }
         savemat(filename, data)
         print('Data saved!\n')
+
+    plt.rcParams['text.usetex'] = True
+    plt.rcParams.update({'font.size': 13})
+    fig2 = plt.figure()
+    ax2 = fig2.add_subplot(1, 1, 1)
+    ax2.plot(q_history[:, 0], q_history[:, 1], '--k', label='Boat Traj.')
+    ax2.plot(q_history[0,0],q_history[0,1], 'ok', label='Boat Start Point')
+    #ax2.plot(q_history[-1,0],q_history[-1,1], 'sk', label='Boat End Point')
+    ax2.plot(dr_history[:,0],dr_history[:,1], '--b', label='Drone Traj.')
+    ax2.plot(dr_history[0,0],dr_history[0,1], 'ob', label='Drone Start Point')
+    #ax2.plot(dr_history[-1,0],dr_history[-1,1], 'sb', label='drone final position')
+    ax2.set_xlabel('$x_I$ (m)')
+    ax2.set_ylabel('$y_I$ (m)')
+    ax2.grid(True)
+    plt.legend()
+    plt.show()
+    fig3 = plt.figure()
+    ax3 = fig3.add_subplot(1, 1, 1)
+    ax3.plot(q_history[:,0],q_history[:,1], '--k', label='Boat Traj. in Sim.')
+    ax3.plot(bt_history[:,0],bt_history[:,1], '-r', label='Boat Traj. in Exp.')
+    ax3.plot(q_history[0,0],q_history[0,1], 'ok', label='Start Point (Sim. and Exp.)')
+    ax3.set_xlabel('$x_I$ (m)')
+    ax3.set_ylabel('$y_I$ (m)')
+    ax3.grid(True)
+    plt.legend()
+    plt.show()
