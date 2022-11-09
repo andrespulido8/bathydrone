@@ -21,6 +21,11 @@ def main():
     lambd = force_x_N
     H_x = np.stack((speed_x_mps, speed_x_mps**2), axis=1)
 
+    lambd2 = force_x_N
+    H_x2 = speed_x_mps
+    drag_x2 = np.linalg.lstsq(H_x2, lambd2, rcond=None)[0]
+    print("drag coefficients 2: ", drag_x2)
+
     drag_x = np.linalg.lstsq(H_x, lambd, rcond=None)[0]
     print("drag coefficients: ", drag_x)
 
