@@ -92,8 +92,12 @@ Minv = npl.inv(M)
 
 def dynamics(q, u):
     """
-    qdot = dynamics(q, u)
-
+    Dynamic model of the boat. Returns the derivatives of the state q based on the control input u
+    Input: 
+        q: State of the boat. Vector of position, orientation and velocites
+        u: control input
+    Output:
+        q_dot: time rate of change of the state. Velocities and acceleration 
     """
     # Centripetal-coriolis matrix
     C = np.array([
@@ -132,10 +136,14 @@ def qminus(ql, qr):
     return dq
 
 def get_boat_position(t, ii):
-    """Return the position of the boat in a point in time
-       Path types:
-            'line' = empty
-            'data' = get the trajectory from a csv"""
+    """
+    Return the position of the boat in a point in time
+    Path types:
+        'line' = empty
+        'data' = get the trajectory from a csv
+            for data it finds the index of the data time that most
+            closely match the simulation time
+    """
     if path_type == 'line':
         return np.array([0, 0, 0])
     elif path_type == 'data':
@@ -148,11 +156,15 @@ def get_boat_position(t, ii):
         return np.array([x, y, 0]), ii
 
 def get_drone_position(t, hd, ii):
-    """Return the position of the drone in a point in time,
-       depending on the desired velocity
-       Path types:
-            'line' = straight line
-            'data' = get the trajectory from a csv"""
+    """
+    Return the position of the drone in a point in time,
+    depending on the desired velocity
+    Path types:
+        'line' = straight line
+        'data' = get the trajectory from a csv
+            for data it finds the index of the data time that most
+            closely match the simulation time
+    """
     if path_type == 'line':
         return np.array([0.7*t, 0.7*t, hd]), 0
     elif path_type == 'data':
@@ -176,6 +188,7 @@ def get_R(q):
 if __name__ == "__main__":
 
     if path_type == 'data':
+        # Choose one option from the datasets (drones and echos)
         df_dr = drones[1]
         df_bt = echos[1]
 
@@ -184,7 +197,7 @@ if __name__ == "__main__":
         #tt = df_dr["time"].to_numpy()[80]
         df_dr["time"] = df_dr["time"] - df_dr["time"].to_numpy()[76]
         df_dr = df_dr.drop(df_dr.index[range(0, 76)])
-    ten_mag = tension_magnitudes[1]
+    ten_mag = tension_magnitudes[1]  # choose magnitude depending on the drones dataset 
     i_last = 0
     ii_last = 0
     t_last = 0
@@ -198,6 +211,7 @@ if __name__ == "__main__":
         T = np.min([df_bt['time1'].to_numpy()[-1],df_dr['time'].to_numpy()[-1]])
         dt = 0.01
 
+    # Matplotlib Animation Parameters 
     framerate = 20  # fps
     speedup = 100  # kinda makes the playback a little faster
     store_data = False  # should data be stored into a .mat?
@@ -218,7 +232,7 @@ if __name__ == "__main__":
                 0, 0, 0, 0], dtype=np.float64)
     q = np.copy(q0)
     u = np.array([0, 0, 0], dtype=np.float64)  # [N, N, N*m]
-    dr = np.array([0, 0, 0], dtype=np.float64)  # [N, N, N*m]
+    dr = np.array([0, 0, 0], dtype=np.float64)  # [m, m, rad]
 
     # Define time domain
     t_arr = np.arange(t0, T, dt)
@@ -234,10 +248,9 @@ if __name__ == "__main__":
     # Integrate dynamics using first-order forward stepping
     for i, t in enumerate(t_arr):
 
-        # Tension input
         R = get_R(q)
-        x = npl.norm(q[:2] - dr[:2])
-        if x <= proj_le or t == 0.0:
+        # Rope length constraint
+        if npl.norm(q[:2] - dr[:2]) <= proj_le or t == 0.0:
             dr, i_last = get_drone_position(t_last, hd, i_last)
             t_last += dt
         
@@ -270,6 +283,8 @@ if __name__ == "__main__":
 
         # Step forward, qnext = qlast + qdot*dt
         q = qplus(q, dynamics(q, u)*dt)
+    
+    ## PLOTS
 
     # Figure for individual results
     fig1 = plt.figure()
