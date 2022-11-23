@@ -4,16 +4,19 @@ Contains a model of a 3DOF marine ship. Supplies parameter values,
 a function for the full nonlinear dynamic. Running this script as
 __main__ will present a quick open-loop simulation.
 
-State is: [x_world_position (m),
-           y_world_position (m),
-           heading_angle_from_x (rad),
-           x_body_velocity (m/s),
-           y_body_velocity (m/s),
-           yaw_rate (rad/s)]
+Boat State is: [x_world_position (m),
+                y_world_position (m),
+                heading_angle_from_x (rad),
+                x_body_velocity (m/s),
+                y_body_velocity (m/s),
+                yaw_rate (rad/s)]
 
-Input is: [x_body_force (N),
-           y_body_force (N),
-           z_torque (N*m)]
+Force u is: [x_body_force (N),
+             y_body_force (N),
+             z_torque (N*m)]
+
+Input dr is: [drone_x_position (m),
+              drone_y_position (m)]
 
 See:
 T. I. Fossen, Handbook of Marine Craft Hydrodynamics
@@ -22,13 +25,25 @@ and Motion Control. Wiley, 2011. Chapter 13.
 Partial code taken from https://github.com/jnez71/misc
 """
 
-import pandas as pd
-import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+
 npl = np.linalg
 
 path_type = 'data'  # 'line' or 'data'
+
+IS_OPEN_LOOP = False 
+kp = np.repeat(0.23, 2)
+ki = np.repeat(0.000005, 2)
+kd = np.repeat(0, 2)
+err_accumulation = np.zeros(2)
+max_ve = 4*0.44704  # mph to m/s 
+saturation = np.repeat(2.0, 2)
+tolerance = 0.02  # meters
+err_reset_dist = 10
+is_debug = False 
 
 if path_type == 'data':
     # Trajectory
@@ -42,8 +57,6 @@ if path_type == 'data':
     drone_12 = pd.read_csv('./traj_data/drone_traj_12.csv')
     echos = [echo_3_051722, echo_6_051722, echo_9_051722, echo_12_051722]
     drones = [drone_3, drone_6, drone_9, drone_12]
-
-# PHYSICAL PARAMETERS
 
 # Offset on the tension application point [m]
 off_x = 0.1905  # measured from the bathydrone vehicle
@@ -176,6 +189,56 @@ def get_drone_position(t, hd, ii):
         y = df_dr['Y_m'].iloc[ii]
         return np.array([x, y, hd]), ii
 
+def pid_controller(t, t_last, q, q_ref , q_dot, q_ref_dot):
+    """ calculate the control input (velocity) based on the desired 
+        trajectory
+    """
+    global err_accumulation
+    command = np.array([0, 0])
+    dt = np.array(t - t_last)
+
+    # Calculate error in position, orientation, and twist (velocities)
+    position_error = q_ref - q 
+    vel_error = q_ref_dot - q_dot 
+    if np.any(kd):
+        feedback_derivative = vel_error*kd 
+
+    # Integral of error (and clip if too large)
+    err_accumulation = err_accumulation + position_error*dt
+
+    # Calculate feedback
+    feedback_proportional = position_error*kp 
+    feedback_integral = err_accumulation*ki
+    if np.any(kd):
+        feedback = feedback_proportional + feedback_derivative + feedback_integral
+    else:
+        feedback = feedback_proportional + feedback_integral
+        
+    command = np.clip(feedback, -saturation, saturation)
+
+    if np.abs(position_error[0]) < tolerance:
+        # do not move if position error is small
+        print('Position error x is small: ', position_error[0]) if is_debug else None
+        command[0] = 0
+    if np.abs(position_error[1]) < tolerance:
+        # do not move if position error is small
+        print('Position error y is small: ', position_error[1]) if is_debug else None
+        command[0] = 0
+    elif np.abs(position_error[0]) > err_reset_dist or np.abs(position_error[1]) > err_reset_dist:
+        # delete accumulated error if error is large 
+        err_accumulation /= 10
+
+    if is_debug:
+        print("Feedback proportional: {}".format(
+            feedback_proportional))
+        if np.any(kd):
+            print("Feedback derivative: {}".format(
+                feedback_derivative))
+        print("feedback integral: {}".format(feedback_integral))
+        print("command: {}".format(command))
+
+    return command, feedback_proportional, feedback_integral    
+
 def get_R(q):
     """ Rotation matrix (orientation, converts body to world)"""
     return np.array([
@@ -195,6 +258,7 @@ if __name__ == "__main__":
         # Fix delta in time
         #kk = np.argmax(df_dr['Y_m'].to_numpy() <= df_bt['Y_m'].to_numpy()[0])
         #tt = df_dr["time"].to_numpy()[80]
+        # up to 76 index is garbage data
         df_dr["time"] = df_dr["time"] - df_dr["time"].to_numpy()[76]
         df_dr = df_dr.drop(df_dr.index[range(0, 76)])
     ten_mag = tension_magnitudes[1]  # choose magnitude depending on the drones dataset 
@@ -218,7 +282,7 @@ if __name__ == "__main__":
     outline_path = True  # show path outline on animation?
 
     # Initial condition
-    # [m, m, rad, m/s, m/s, rad/s]
+    # State: [m, m, rad, m/s, m/s, rad/s]
     x0 = -14
     if path_type == 'line':
         q0 = np.array([x0, -np.sqrt(proj_le**2 - x0**2),
@@ -233,6 +297,7 @@ if __name__ == "__main__":
     q = np.copy(q0)
     u = np.array([0, 0, 0], dtype=np.float64)  # [N, N, N*m]
     dr = np.array([0, 0, 0], dtype=np.float64)  # [m, m, rad]
+    dr, _ = get_drone_position(t_last, hd, i_last)
 
     # Define time domain
     t_arr = np.arange(t0, T, dt)
@@ -244,14 +309,29 @@ if __name__ == "__main__":
     u_history = np.zeros((len(t_arr), int(len(q)/2)))
     u_world_history = np.zeros((len(t_arr), int(len(q)/2)))
     head_dr = np.zeros((len(t_arr)))
+    dr_v_hist = np.zeros((len(t_arr), 2)) 
+    p_cmd_hist = np.zeros((len(t_arr), 2))
+    i_cmd_hist = np.zeros((len(t_arr), 2))
 
     # Integrate dynamics using first-order forward stepping
     for i, t in enumerate(t_arr):
 
+        # q_ref is boat position from the data
+        q_ref, ii_last = get_boat_position(t, ii_last)
+
+        if df_dr.shape[0] == i:
+            print('End of data')
         R = get_R(q)
         # Rope length constraint
         if npl.norm(q[:2] - dr[:2]) <= proj_le or t == 0.0:
-            dr, i_last = get_drone_position(t_last, hd, i_last)
+            if IS_OPEN_LOOP:
+                dr, i_last = get_drone_position(t_last, hd, i_last)
+            else:
+                # closed loop controller
+                q_dot = 0
+                q_ref_dot = 0
+                v_dr, p_cmd, i_cmd = pid_controller(t, t_last, q[:2], q_ref[:2], q_dot, q_ref_dot)
+                dr[:2] = dr[:2] + v_dr * dt
             t_last += dt
         
         app_point = np.array([q[0], q[1], 0]) + R.dot(r) # world coord
@@ -268,8 +348,6 @@ if __name__ == "__main__":
         if npl.norm(q[:2] - dr[:2]) < proj_le-2:
             u = np.array([0, 0, 0])
 
-        br, ii_last = get_boat_position(t, ii_last)
-
         #if q[1] <= df_bt['Y_m'].to_numpy()[0]:
         #    print(i)
         # Record this instant
@@ -279,7 +357,11 @@ if __name__ == "__main__":
         u_history[i] = u
         u_world_history[i] = ten
         head_dr[i] = np.degrees(np.arctan2(diff_pos[1],diff_pos[0]))
-        bt_history[i] = br 
+        if not IS_OPEN_LOOP:
+            bt_history[i] = q_ref 
+            dr_v_hist[i] = v_dr
+            p_cmd_hist[i] = p_cmd
+            i_cmd_hist[i] = i_cmd
 
         # Step forward, qnext = qlast + qdot*dt
         q = qplus(q, dynamics(q, u)*dt)
@@ -295,9 +377,9 @@ if __name__ == "__main__":
     # Plot x position
     ax = fig1.add_subplot(fig1rows, fig1cols, 1)
     ax.set_title('X Position (m)', fontsize=16)
-    ax.plot(t_arr, q_history[:, 0], 'g', label="nonlinear")
+    ax.plot(t_arr, q_history[:, 0], 'g', label="sim boat")
     ax.plot(t_arr, dr_history[:, 0], 'b', label="drone")
-    if path_type == 'data': ax.plot(t_arr, bt_history[:,0], 'k', label='boat')
+    if path_type == 'data': ax.plot(t_arr, bt_history[:,0], 'r', label='boat reference (data)')
     ax.grid(True)
     ax.legend()
 
@@ -306,13 +388,13 @@ if __name__ == "__main__":
     ax.set_title('Y Position (m)', fontsize=16)
     ax.plot(t_arr, q_history[:, 1], 'g',
             t_arr, dr_history[:, 1], 'b')
-    if path_type == 'data': ax.plot(t_arr, bt_history[:,1], 'k')
+    if path_type == 'data': ax.plot(t_arr, bt_history[:,1], 'r')
     ax.grid(True)
 
     # Plot orientation
     ax = fig1.add_subplot(fig1rows, fig1cols, 3)
-    ax.set_title('Heading (deg)', fontsize=16)
-    ax.plot(t_arr, np.rad2deg(q_history[:, 2]), 'g',)
+    ax.set_title('Heading (deg)', fontsize=16,)
+    ax.plot(t_arr, np.rad2deg(q_history[:, 2]), 'g', label="sim boat heading")
     ax.plot(t_arr, head_dr, 'k', label='heading from boat to drone')
     ax.grid(True)
     ax.legend()
@@ -353,8 +435,6 @@ if __name__ == "__main__":
     ax.plot(t_arr, u_world_history[:, 0], 'b', label='x [N]')
     ax.plot(t_arr, u_world_history[:, 1], 'g', label='y [N]')
     ax.plot(t_arr, u_world_history[:, 2], 'r', label='z [N m]')
-    ax.grid(True)
-
     ax.set_xlabel('Time (s)')
     ax.legend()
     ax.grid(True)
@@ -365,7 +445,7 @@ if __name__ == "__main__":
     ax.plot(t_arr, dr_history[:, 0] - q_history[:, 0], 'b', label='x [m]')
     ax.plot(t_arr, dr_history[:, 1] - q_history[:, 1], 'g', label='y [m]')
     ax.set_xlabel('Time (s)')
-    plt.legend()
+    ax.legend()
     ax.grid(True)
 
     # Dist norm drone and boat
@@ -375,10 +455,44 @@ if __name__ == "__main__":
         q_history[:, 1] - dr_history[:, 1])**2), 'k')
     ax.plot([t_arr[0], t_arr[-1]], [proj_le, proj_le], '-r', label='rope length')
     ax.set_xlabel('Time (s)')
-    plt.legend()
+    ax.legend()
     ax.grid(True)
     plt.show()
 
+    if path_type == 'data': 
+        print("Mean Square Error X: ", np.mean((q_history[:, 0] - bt_history[:, 0])**2))
+        print("Mean Square Error Y: ", np.mean((q_history[:, 1] - bt_history[:, 1])**2))
+        fig2 = plt.figure()
+        fig2.suptitle('Error Evolution', fontsize=20)
+        fig1rows = 1
+        fig1cols = 5  
+        ax1 = fig2.add_subplot(fig1rows, fig1cols, 1)
+        ax1.set_title('X Error (m)', fontsize=16)
+        ax1.plot(t_arr, bt_history[:, 0] - q_history[:, 0], 'k')
+        ax1.grid(True)
+        ax1 = fig2.add_subplot(fig1rows, fig1cols, 2)
+        ax1.set_title('Y Error (m)', fontsize=16)
+        ax1.plot(t_arr, bt_history[:, 1] - q_history[:, 1], 'b')
+        ax1.grid(True)
+        ax1 = fig2.add_subplot(fig1rows, fig1cols, 3)
+        ax1.set_title('Drone vel (m/s)', fontsize=16)
+        ax1.plot(t_arr, dr_v_hist[:, 0], 'k', label="vx")
+        ax1.plot(t_arr, dr_v_hist[:, 1], 'b', label="vy")
+        ax1.grid(True)
+        ax1.legend()
+        ax1 = fig2.add_subplot(fig1rows, fig1cols, 4)
+        ax1.set_title('P command (m/s)', fontsize=16)
+        ax1.plot(t_arr, p_cmd_hist[:, 0], 'k', label="x")
+        ax1.plot(t_arr, p_cmd_hist[:, 1], 'b', label="y")
+        ax1.grid(True)
+        ax1.legend()
+        ax1 = fig2.add_subplot(fig1rows, fig1cols, 5)
+        ax1.set_title('I command (m/s)', fontsize=16)
+        ax1.plot(t_arr, i_cmd_hist[:, 0], 'k', label="x")
+        ax1.plot(t_arr, i_cmd_hist[:, 1], 'b', label="y")
+        ax1.grid(True)
+        ax1.legend()
+        plt.show()
 
     # Figure for animation
     fig6 = plt.figure()
@@ -393,13 +507,13 @@ if __name__ == "__main__":
     pthick = 100
     lthick = 2
     llen = 2.5
-    p = ax6.scatter(q_history[0, 0], q_history[0, 1], color='k', s=pthick)
+    p = ax6.scatter(q_history[0, 0], q_history[0, 1], color='k', s=pthick, label='simulated boat')
     h = ax6.plot([q_history[0, 0], q_history[0, 0] + llen*np.cos(q_history[0, 2])],
                  [q_history[0, 1], q_history[0, 1] + llen*np.sin(q_history[0, 2])], color='k', linewidth=lthick)
-    pref = ax6.scatter(dr_history[0, 0], dr_history[0, 1], color='b', s=pthick)
+    pref = ax6.scatter(dr_history[0, 0], dr_history[0, 1], color='b', s=pthick, label='drone')
     href = ax6.plot([dr_history[0, 0], dr_history[0, 0] - 0.8*llen*u_world_history[0, 0]],
                     [dr_history[0, 1], dr_history[0, 1] - 0.8*llen*u_world_history[0, 1]], color='r', linewidth=lthick)
-    pact = ax6.scatter(bt_history[0, 0], bt_history[0, 1], color='c', s=pthick)
+    pact = ax6.scatter(bt_history[0, 0], bt_history[0, 1], color='c', s=pthick, label='boat data')
 
     # Plot entirety of actual trajectory
     if outline_path:
@@ -435,6 +549,7 @@ if __name__ == "__main__":
     # Run animation
     ani = animation.FuncAnimation(
         fig6, func=update_ani, interval=dt*1000/speedup)
+    plt.legend()
     plt.show()
 
 #    # Store data
