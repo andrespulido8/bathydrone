@@ -61,15 +61,15 @@ Iz =  4  # mass moment of intertia from SolidWorks
 tension_magnitudes = [9, 11, 18, 27.5]
 
 # Fluid inertial effects
-wm_xu = -4*m  # kg        Increase to damp more the yaw wrt to drone 
-wm_yv = -0.25*m  # kg       #    
-wm_yr = -0.25*m*xg  # kg*m
+wm_xu = -6*m  # kg        Increase to damp more the yaw wrt to drone 
+wm_yv = -0.5*m  # kg       #    
+wm_yr = -0.5*m*xg  # kg*m
 wm_nr = -0.25*Iz  # kg*m**2  #
 
 # Drag
-d_xuu = -3.5 #0.25 * wm_xu  # N/(m/s)**2
-d_yvv = -4 #0.25 * wm_yv  # N/(m/s)**2
-d_nrr = -4 #0.25 * (wm_nr + wm_yr)  # (N*m)/(rad/s)**2
+d_xuu = -5.75 #0.25 * wm_xu  # N/(m/s)**2
+d_yvv = -7 #0.25 * wm_yv  # N/(m/s)**2
+d_nrr = -7 #0.25 * (wm_nr + wm_yr)  # (N*m)/(rad/s)**2
 
 # Cross-flow
 d_yrr = 0.25 * wm_yr  # N/(rad/s)**2
