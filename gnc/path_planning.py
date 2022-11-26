@@ -1,7 +1,7 @@
-import numpy as np 
+#!/usr/bin/env python3
 import matplotlib.pyplot as plt
-import math
-import itertools
+import numpy as np
+
 
 #enter sp1 as [x,y]
 #enter sp2 as [x,y]
@@ -64,28 +64,8 @@ class pp:
             for y in S:
                 (x,y)
                 plt.scatter(x,y,c='red')
-             
                     
         plt.show()
-       
-        
 
-        
-    
-            
-      
-        return 
-        
-
-        
-
-
-G=pp([0,0],[16,16],4,4)
-
-
-
-
-  
-
-
-
+if __name__ == "__main__":
+    G=pp([0,0],[160,160],40,40)
