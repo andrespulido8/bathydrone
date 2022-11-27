@@ -34,12 +34,12 @@ from path_planning import pp
 
 npl = np.linalg
 
-path_type = 'data'  # 'lawnmower', 'line' or 'data'
+path_type = 'data'  # 'lawnmower', 'line' or 'data','trajetory'
 
 IS_OPEN_LOOP = False 
-kp = np.repeat(0.23, 2)
-ki = np.repeat(0.000005, 2)
-kd = np.repeat(0, 2)
+kp = np.array([0.2,0.2,0]) if path_type == 'trajectory' else np.repeat(0.2,2)
+ki = np.array([0.00001, 0.00001, 0.0]) if path_type == 'trajectory' else np.repeat(0.00001,2)
+kd = np.repeat(0, 3) if path_type == 'trajectory' else np.repeat(0.0,2)
 err_accumulation = np.zeros(2)
 max_ve = 4*0.44704  # mph to m/s 
 saturation = np.repeat(2.0, 2)
@@ -111,16 +111,67 @@ M = np.array([
             ])
 Minv = npl.inv(M)
 
+## Trajectory Planning
+nstates = 6
+ncontrols = 2
+# Vehicle dimensions
+boat_length = 1  # m
+boat_width = 0.5  # m
+goal_buffer = [6, 6, np.inf, np.inf, np.inf, np.inf]
+error_tol = np.copy(goal_buffer)/2
+obs = []
+goal_bias = [0.7, 0.7, 0, 0, 0, 0]
+goal = [20, 20, np.deg2rad(90), 0, 0, 0]
 
-def dynamics(q, u):
+# Definition of collision
+def is_feasible(x, u):
+    for ob in obs:
+        if npl.norm(x[:2] - ob[:2]) <= boat_length/2 + ob[2]:
+            return False
+    return True
+
+def erf(xgoal, x):
+    """Returns error e given two states xgoal and x.
+    Angle differences are taken properly on SO3."""
+    return xgoal - x
+
+def lqr(x, u):
+    """Returns cost-to-go matrix S and policy matrix K given local state x and effort u.
+    """
+    global kp, kd
+    kp = np.diag(kp)
+    kd = np.diag(kd)
+    S = np.diag([1, 1, 1, 1, 1, 1])
+    K = np.hstack((kp, kd))
+    return (S, K)
+
+def dynamics(q, v_dr, dt):
     """
     Dynamic model of the boat. Returns the derivatives of the state q based on the control input u
     Input: 
         q: State of the boat. Vector of position, orientation and velocites
-        u: control input
+        v_dr: control input (velocity of drone)
     Output:
         q_dot: time rate of change of the state. Velocities and acceleration 
     """
+    global u, ten, diff_pos
+    R = get_R(q)
+        
+    dr[:2] = dr[:2] + v_dr[:2] * dt
+    app_point = np.array([q[0], q[1], 0]) + R.dot(r) # world coord
+    diff_pos = dr - app_point
+    diff_pos = diff_pos/npl.norm(diff_pos)
+
+    ten = ten_mag*diff_pos
+    ten_body = R.T.dot(ten)
+    moments = np.cross(r, ten_body)
+    u[:2] = ten_body[:2]
+    u[2] = moments[2]  # apply moment about z
+    ten[2] = moments[2]
+        
+    if npl.norm(q[:2] - dr[:2]) < proj_le-2:
+        u = np.array([0, 0, 0])
+        
     # Centripetal-coriolis matrix
     C = np.array([
                   [                                     0,                0, (wm_yr - m*xg)*q[5] + (wm_yv - m)*q[4]],
@@ -139,7 +190,7 @@ def dynamics(q, u):
 
     # M*vdot + C*v + D*v = u  and  pdot = R*v
     dyn = np.concatenate((R.dot(q[3:]), Minv.dot(u - (C + D).dot(q[3:]))))
-    return dyn
+    return qplus(q, dyn*dt)
 
 def unwrap(ang):
     "Returns an angle on [-pi, pi]"
@@ -279,7 +330,7 @@ if __name__ == "__main__":
 
     # Simulation duration, timestep and animation parameters
     t0 = 0
-    if path_type == 'line':
+    if path_type == 'line' or path_type == 'lawnmower' or path_type == 'trajectory':
         T = 60  # s
         dt = 0.001
     elif path_type == 'data':
@@ -295,7 +346,7 @@ if __name__ == "__main__":
     # Initial condition
     # State: [m, m, rad, m/s, m/s, rad/s]
     x0 = -14
-    if path_type == 'line' or path_type == 'lawnmower':
+    if path_type == 'line' or path_type == 'lawnmower' or path_type == 'trajectory':
         q0 = np.array([x0, -np.sqrt(proj_le**2 - x0**2),
                        0, 0, 0, 0], dtype=np.float64)
         dr = np.array([0, 0, 0], dtype=np.float64)  # [m, m, rad]
@@ -306,7 +357,10 @@ if __name__ == "__main__":
         #        0, 0, 0, 0], dtype=np.float64)
         q0 = np.array([df_bt['X_m'].iloc[jj], df_bt['Y_m'].iloc[jj],
                 0, 0, 0, 0], dtype=np.float64)
+        global ten, diff_pos
         dr, _ = get_drone_position(t_last, hd, i_last)
+        ten = np.array([0,0,0], dtype=np.float64)
+        diff_pos = np.array([0, 0], dtype=np.float64)  # [m, m, rad]
     q = np.copy(q0)
     u = np.array([0, 0, 0], dtype=np.float64)  # [N, N, N*m]
 
@@ -324,41 +378,50 @@ if __name__ == "__main__":
     p_cmd_hist = np.zeros((len(t_arr), 2))
     i_cmd_hist = np.zeros((len(t_arr), 2))
 
+    if path_type == 'trajectory':
+        sample_space = [(q0[0], goal[0]),
+                        (q0[1], goal[1]),
+                        (-np.pi, np.pi),
+                        (0, saturation[0]),
+                        (-saturation[1]/2, saturation[1]/2),
+                        (-0.2, 0.2)]
+        constraints = lqrrt.Constraints(nstates=nstates, ncontrols=ncontrols,
+                                        goal_buffer=goal_buffer, is_feasible=is_feasible)
+        planner = lqrrt.Planner(dynamics, lqr, constraints,
+                                horizon=2, dt=dt, FPR=0.5,
+                                error_tol=error_tol, erf=erf,
+                                min_time=0.5, max_time=2, max_nodes=1E5,
+                            goal0=goal)
+
+        planner.update_plan(q0, sample_space, goal_bias=goal_bias, finish_on_goal=True)
+    
     # Integrate dynamics using first-order forward stepping
     for i, t in enumerate(t_arr):
 
         if df_dr.shape[0] == i:
             print('End of data')
 
-        R = get_R(q)
         # Rope length constraint
         if npl.norm(q[:2] - dr[:2]) <= proj_le or t == 0.0:
             if IS_OPEN_LOOP:
                 dr, i_last = get_drone_position(t_last, hd, i_last)
             else:
-                # q_ref is boat position from the data
-                q_ref, ii_last = get_boat_position(t, ii_last)
+                if path_type == 'data':
+                    # q_ref is boat position from the data
+                    q_ref, ii_last = get_boat_position(t, ii_last)
 
-                # closed loop controller
-                q_dot = 0
-                q_ref_dot = 0
-                v_dr, p_cmd, i_cmd = pid_controller(t, t_last, q[:2], q_ref[:2], q_dot, q_ref_dot)
-                dr[:2] = dr[:2] + v_dr * dt
+                    # closed loop controller
+                    q_dot = 0
+                    q_ref_dot = 0
+                    v_dr, p_cmd, i_cmd = pid_controller(t, t_last, q[:2], q_ref[:2], q_dot, q_ref_dot)
+                elif path_type == 'trajectory':
+                    # Planner's decision
+                    q_ref = planner.get_state(t)
+                    uref = planner.get_effort(t)
+
+                    # Controller's decision
+                    v_dr = lqr(q, uref)[1].dot(erf(q_ref, np.copy(q)))
             t_last += dt
-        
-        app_point = np.array([q[0], q[1], 0]) + R.dot(r) # world coord
-        diff_pos = dr - app_point
-        diff_pos = diff_pos/npl.norm(diff_pos)
-
-        ten = ten_mag*diff_pos
-        ten_body = R.T.dot(ten)
-        moments = np.cross(r, ten_body)
-        u[:2] = ten_body[:2]
-        u[2] = moments[2]  # apply moment about z
-        ten[2] = moments[2]
-        
-        if npl.norm(q[:2] - dr[:2]) < proj_le-2:
-            u = np.array([0, 0, 0])
 
         q_history[i] = q
         dr_history[i] = dr
@@ -366,13 +429,17 @@ if __name__ == "__main__":
         u_world_history[i] = ten
         head_dr[i] = np.degrees(np.arctan2(diff_pos[1],diff_pos[0]))
         if not IS_OPEN_LOOP:
-            bt_history[i] = q_ref 
-            dr_v_hist[i] = v_dr
-            p_cmd_hist[i] = p_cmd
-            i_cmd_hist[i] = i_cmd
+            if path_type == 'data':
+                bt_history[i] = q_ref
+                dr_v_hist[i] = v_dr
+                p_cmd_hist[i] = p_cmd
+                i_cmd_hist[i] = i_cmd
+            else:
+                bt_history[i] = q_ref[:3] 
+                dr_v_hist[i] = v_dr[:2]
 
         # Step forward, qnext = qlast + qdot*dt
-        q = qplus(q, dynamics(q, u)*dt)
+        q = dynamics(q, v_dr, dt)
     
     ## PLOTS
 
@@ -501,6 +568,27 @@ if __name__ == "__main__":
         ax1.grid(True)
         ax1.legend()
         plt.show()
+    elif path_type == 'trajectory':
+        print("Mean Square Error X: ", np.mean((q_history[:, 0] - bt_history[:, 0])**2))
+        print("Mean Square Error Y: ", np.mean((q_history[:, 1] - bt_history[:, 1])**2))
+        fig2 = plt.figure()
+        ax1 = fig2.add_subplot(1, 1, 1)
+        dx = 0; dy = 1
+        ax1.set_xlabel('- State {} +'.format(dx))
+        ax1.set_ylabel('- State {} +'.format(dy))
+        ax1.grid(True)
+        for ID in range(planner.tree.size):
+            x_seq = np.array(planner.tree.x_seq[ID])
+            if ID in planner.node_seq:
+                ax1.plot((x_seq[:, dx]), (x_seq[:, dy]), color='r', zorder=2)
+            else:
+                ax1.plot((x_seq[:, dx]), (x_seq[:, dy]), color='0.75', zorder=1)
+        ax1.scatter(planner.tree.state[0, dx], planner.tree.state[0, dy], color='b', s=48)
+        ax1.scatter(planner.tree.state[planner.node_seq[-1], dx], planner.tree.state[planner.node_seq[-1], dy], color='r', s=48)
+        ax1.scatter(goal[dx], goal[dy], color='g', s=48)
+        for ob in obs:
+            ax1.add_patch(plt.Circle((ob[0], ob[1]), radius=ob[2], fc='r'))
+
 
     # Figure for animation
     fig6 = plt.figure()
