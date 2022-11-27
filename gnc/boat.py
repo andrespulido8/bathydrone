@@ -24,15 +24,17 @@ and Motion Control. Wiley, 2011. Chapter 13.
 
 Partial code taken from https://github.com/jnez71/misc
 """
-
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from lqRRT import lqrrt
+from path_planning import pp
+
 npl = np.linalg
 
-path_type = 'data'  # 'line' or 'data'
+path_type = 'data'  # 'lawnmower', 'line' or 'data'
 
 IS_OPEN_LOOP = False 
 kp = np.repeat(0.23, 2)
@@ -57,6 +59,13 @@ if path_type == 'data':
     drone_12 = pd.read_csv('./traj_data/drone_traj_12.csv')
     echos = [echo_3_051722, echo_6_051722, echo_9_051722, echo_12_051722]
     drones = [drone_3, drone_6, drone_9, drone_12]
+elif path_type == 'lawnmower':
+    sp1=[0,0]
+    sp2=[160,160]
+    dx=40
+    dy=40
+    is_plot=True
+    path = pp(sp1,sp2,dx,dy,is_plot).path()
 
 # Offset on the tension application point [m]
 off_x = 0.1905  # measured from the bathydrone vehicle
@@ -157,8 +166,8 @@ def get_boat_position(t, ii):
             for data it finds the index of the data time that most
             closely match the simulation time
     """
-    if path_type == 'line':
-        return np.array([0, 0, 0])
+    if path_type == 'line' and not IS_OPEN_LOOP:
+        raise ValueError('Path type "line" is only for open loop simulations')
     elif path_type == 'data':
         t_i = df_dr['time'].iloc[ii]
         while t_i <= t:
@@ -167,6 +176,8 @@ def get_boat_position(t, ii):
         x = df_bt['X_m'].iloc[ii]
         y = df_bt['Y_m'].iloc[ii]
         return np.array([x, y, 0]), ii
+    elif path_type == 'lawnmower':
+        path = 0  # TODO: implement
 
 def get_drone_position(t, hd, ii):
     """
@@ -284,9 +295,10 @@ if __name__ == "__main__":
     # Initial condition
     # State: [m, m, rad, m/s, m/s, rad/s]
     x0 = -14
-    if path_type == 'line':
+    if path_type == 'line' or path_type == 'lawnmower':
         q0 = np.array([x0, -np.sqrt(proj_le**2 - x0**2),
                        0, 0, 0, 0], dtype=np.float64)
+        dr = np.array([0, 0, 0], dtype=np.float64)  # [m, m, rad]
     elif path_type == 'data':
         jj = np.argmax(df_dr['time'].to_numpy() >= t0)
         #q0 = np.array([x0 + df_dr['X_m'].iloc[jj],
@@ -294,10 +306,9 @@ if __name__ == "__main__":
         #        0, 0, 0, 0], dtype=np.float64)
         q0 = np.array([df_bt['X_m'].iloc[jj], df_bt['Y_m'].iloc[jj],
                 0, 0, 0, 0], dtype=np.float64)
+        dr, _ = get_drone_position(t_last, hd, i_last)
     q = np.copy(q0)
     u = np.array([0, 0, 0], dtype=np.float64)  # [N, N, N*m]
-    dr = np.array([0, 0, 0], dtype=np.float64)  # [m, m, rad]
-    dr, _ = get_drone_position(t_last, hd, i_last)
 
     # Define time domain
     t_arr = np.arange(t0, T, dt)
@@ -316,17 +327,18 @@ if __name__ == "__main__":
     # Integrate dynamics using first-order forward stepping
     for i, t in enumerate(t_arr):
 
-        # q_ref is boat position from the data
-        q_ref, ii_last = get_boat_position(t, ii_last)
-
         if df_dr.shape[0] == i:
             print('End of data')
+
         R = get_R(q)
         # Rope length constraint
         if npl.norm(q[:2] - dr[:2]) <= proj_le or t == 0.0:
             if IS_OPEN_LOOP:
                 dr, i_last = get_drone_position(t_last, hd, i_last)
             else:
+                # q_ref is boat position from the data
+                q_ref, ii_last = get_boat_position(t, ii_last)
+
                 # closed loop controller
                 q_dot = 0
                 q_ref_dot = 0
@@ -347,10 +359,6 @@ if __name__ == "__main__":
         
         if npl.norm(q[:2] - dr[:2]) < proj_le-2:
             u = np.array([0, 0, 0])
-
-        #if q[1] <= df_bt['Y_m'].to_numpy()[0]:
-        #    print(i)
-        # Record this instant
 
         q_history[i] = q
         dr_history[i] = dr
