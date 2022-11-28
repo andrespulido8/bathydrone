@@ -17,13 +17,14 @@ path_type = 'lawnmower'  # 'lawnmower', 'line', 'trajetory' or 'data'
 
 IS_OPEN_LOOP = False 
 kp = np.array([0.2,0.2,0]) if path_type == 'trajectory' else np.repeat(0.2,2)
-ki = np.array([0.00001, 0.00001, 0.0]) if path_type == 'trajectory' else np.repeat(0.00001,2)
-kd = np.repeat(0, 3) if path_type == 'trajectory' else np.repeat(0.0,2)
+ki = np.array([0.001, 0.001, 0.0]) if path_type == 'trajectory' else np.repeat(0.001,2)
+kd = np.repeat(0.1, 3) if path_type == 'trajectory' else np.repeat(0.0,2)
 err_accumulation = np.zeros(2)
 max_ve = 4*0.44704  # mph to m/s 
-saturation = np.repeat(2.0, 2)
-tolerance = 0.02  # meters
-err_reset_dist = 10
+saturation = np.repeat(1.8, 2)  # max vel of drone [m/s]
+tolerance = 0.2  # meters
+traj_tolerance = 20.
+err_reset_dist = 30
 is_debug = False 
 
 if path_type == 'data':
@@ -39,12 +40,11 @@ if path_type == 'data':
     echos = [echo_3_051722, echo_6_051722, echo_9_051722, echo_12_051722]
     drones = [drone_3, drone_6, drone_9, drone_12]
 elif path_type == 'lawnmower':
-    sp1=[0,0]
-    sp2=[160,160]
-    dx=40
-    dy=40
+    sp1 = [0,0]
+    sp2 = [120,80]
+    dy = 60
     is_plot = False
-    planning = pp(sp1,sp2,dx,dy,is_plot)
+    planning = pp(sp1,sp2,dy,is_plot)
     traj = planning.trajectory(max_vel=saturation[0]) 
 
 tension_magnitudes = [9, 11, 18, 27.5]
@@ -169,7 +169,7 @@ def pid_controller(t, t_last, q, q_ref , q_dot, q_ref_dot):
         command[0] = 0
     elif np.abs(position_error[0]) > err_reset_dist or np.abs(position_error[1]) > err_reset_dist:
         # delete accumulated error if error is large 
-        err_accumulation /= 10
+        err_accumulation /= 5
 
     if is_debug:
         print("Feedback proportional: {}".format(
@@ -212,9 +212,12 @@ if __name__ == "__main__":
 
     # Simulation duration, timestep and animation parameters
     t0 = 0
-    if path_type == 'line' or path_type == 'lawnmower' or path_type == 'trajectory':
+    if path_type == 'line' or path_type == 'trajectory':
         T = 60  # s
         dt = 0.001
+    elif path_type == 'lawnmower':
+        T = traj.shape[0]*6.6/2  # s
+        dt = 0.01
     elif path_type == 'data':
         T = np.min([df_bt['time1'].to_numpy()[-1],df_dr['time'].to_numpy()[-1]])
         dt = 0.01
@@ -228,7 +231,7 @@ if __name__ == "__main__":
     dynamics = TetheredDynamics(ten_mag=ten_mag)
     # Initial condition
     # State: [m, m, rad, m/s, m/s, rad/s]
-    x0 = -14
+    x0 = 0
     if path_type == 'line' or path_type == 'lawnmower' or path_type == 'trajectory':
         q0 = np.array([x0, -np.sqrt(dynamics.proj_le**2 - x0**2),
                        0, 0, 0, 0], dtype=np.float64)
@@ -278,45 +281,47 @@ if __name__ == "__main__":
     
     dynamics.dr = dr0
     print("dr0: {}".format(dr0))
+    print("q0: {}".format(q0))
     # Integrate dynamics using first-order forward stepping
     for i, t in enumerate(t_arr):
 
-        #if df_dr.shape[0] == i:
-        #    print('End of data')
+        if traj.shape[0] == ii_last:
+            print('End of data. Time=', t)
+            break
 
         q_ref = planner.get_state(t) if path_type == 'trajectory' else None
+        
+        q_dot = q[3:]
+        q_ref = traj[ii_last][:3]
+        q_ref_dot = traj[ii_last][3:]
         # Rope length constraint
-        if npl.norm(q[:2] - dynamics.dr[:2]) <= dynamics.proj_le or t == 0.0:
-            if IS_OPEN_LOOP:
-                dynamics.dr, i_last = get_drone_position(t_last, dynamics.hd, i_last)
-            else:
-                if path_type == 'data':
-                    # q_ref is boat position from the data
-                    q_ref, ii_last = get_boat_position(t, ii_last)
-                    # closed loop controller
-                    q_dot = 0
-                    q_ref_dot = 0
-                elif path_type == 'trajectory':
-                    # Planner's decision
-                    u_ref = planner.get_effort(t)
-
-                    # Controller's decision
-                    kk = lqr(q, u_ref)[1]
-                    ee = erf(q_ref, np.copy(q))
-                    v_dr = kk.dot(ee)
-                    #print("lqr: ", lqr(q, uref)[1])
-                    #print("erf: ", erf(q_ref, np.copy(q)))
-                    #print("v_dr: ", v_dr)
-                elif path_type == 'lawnmower':
-                    q_ref = traj[ii_last]
-                    ee = erf(q_ref, np.copy(q))
-                    if npl.norm(ee[:2]) < tolerance*2: 
-                        ii_last = ii_last + 1
-
-                v_dr, p_cmd, i_cmd = pid_controller(t, t_last, q[:2], q_ref[:2], q_dot, q_ref_dot)
-            t_last += dt
+        if IS_OPEN_LOOP:
+            dynamics.dr, i_last = get_drone_position(t_last, dynamics.hd, i_last)
         else:
-            v_dr = np.array([0,0,0])
+            if path_type == 'data':
+                # q_ref is boat position from the data
+                q_ref, ii_last = get_boat_position(t, ii_last)
+                # closed loop controller
+                q_dot = 0
+                q_ref_dot = 0
+            elif path_type == 'trajectory':
+                # Planner's decision
+                u_ref = planner.get_effort(t)
+
+                # Controller's decision
+                kk = lqr(q, u_ref)[1]
+                ee = erf(q_ref, np.copy(q))
+                v_dr = kk.dot(ee)
+                #print("lqr: ", lqr(q, uref)[1])
+                #print("erf: ", erf(q_ref, np.copy(q)))
+                #print("v_dr: ", v_dr)
+            elif path_type == 'lawnmower':
+                ee = erf(q_ref, np.copy(q[:3]))
+                if npl.norm(ee[:2]) < traj_tolerance: 
+                    ii_last = ii_last + 1
+
+            v_dr, p_cmd, i_cmd = pid_controller(t, t_last, q[:2], q_ref[:2], q_dot, q_ref_dot)
+        t_last += dt
 
         q_history[i] = q
         dr_history[i] = dynamics.dr
@@ -324,20 +329,20 @@ if __name__ == "__main__":
         u_world_history[i] = dynamics.ten
         head_dr[i] = np.degrees(np.arctan2(dynamics.diff_pos[1],dynamics.diff_pos[0]))
         if not IS_OPEN_LOOP:
+            dr_v_hist[i] = v_dr[:2]
             if path_type == 'data' or path_type == 'lawnmower':
                 bt_history[i] = q_ref
-                dr_v_hist[i] = v_dr
                 p_cmd_hist[i] = p_cmd
                 i_cmd_hist[i] = i_cmd
             else:
                 bt_history[i] = q_ref[:3] 
-                dr_v_hist[i] = v_dr[:2]
 
         # Step forward, qnext = qlast + qdot*dt
         q = dynamics.step(q, v_dr, dt)
     
     ## PLOTS
 
+    print(1)
     # Figure for individual results
     fig1 = plt.figure()
     fig1.suptitle('State Evolution', fontsize=20)
@@ -349,18 +354,23 @@ if __name__ == "__main__":
     ax.set_title('X Position (m)', fontsize=16)
     ax.plot(t_arr, q_history[:, 0], 'g', label="sim boat")
     ax.plot(t_arr, dr_history[:, 0], 'b', label="drone")
-    if path_type == 'data': ax.plot(t_arr, bt_history[:,0], 'r', label='boat reference (data)')
+    if path_type == 'data' or path_type == 'lawnmower': 
+        ax.plot(t_arr, bt_history[:,0], 'r', label='boat reference (data)')
+        ax.plot(t_arr, bt_history[:,0]-traj_tolerance, '--r')
+        ax.plot(t_arr, bt_history[:,0]+traj_tolerance, '--r')
     ax.grid(True)
     ax.legend()
-
     # Plot y position
     ax = fig1.add_subplot(fig1rows, fig1cols, 2)
     ax.set_title('Y Position (m)', fontsize=16)
     ax.plot(t_arr, q_history[:, 1], 'g',
             t_arr, dr_history[:, 1], 'b')
-    if path_type == 'data': ax.plot(t_arr, bt_history[:,1], 'r')
+    if path_type == 'data' or path_type == 'lawnmower': 
+        ax.plot(t_arr, bt_history[:,1], 'r')
+        ax.plot(t_arr, bt_history[:,1]-traj_tolerance, '--r')
+        ax.plot(t_arr, bt_history[:,1]+traj_tolerance, '--r')
     ax.grid(True)
-
+    
     # Plot orientation
     ax = fig1.add_subplot(fig1rows, fig1cols, 3)
     ax.set_title('Heading (deg)', fontsize=16,)
@@ -418,18 +428,21 @@ if __name__ == "__main__":
     ax.legend()
     ax.grid(True)
 
+    print(3)
     # Dist norm drone and boat
     ax = fig1.add_subplot(fig1rows, fig1cols, 10)
     ax.set_title('Norm of Distance (m)', fontsize=16)
     ax.plot(t_arr, np.sqrt((q_history[:, 0] - dr_history[:, 0])**2 + (
         q_history[:, 1] - dr_history[:, 1])**2), 'k')
     ax.plot([t_arr[0], t_arr[-1]], [dynamics.proj_le, dynamics.proj_le], '-r', label='rope length')
+    ax.plot([t_arr[0], t_arr[-1]], [dynamics.proj_le-dynamics.dL, dynamics.proj_le-dynamics.dL], '--g', label='force threshold')
+    ax.plot([t_arr[0], t_arr[-1]], [dynamics.proj_le+dynamics.dL, dynamics.proj_le+dynamics.dL], '-g', label='no v_dr threshold')
     ax.set_xlabel('Time (s)')
     ax.legend()
     ax.grid(True)
     plt.show()
-
-    if path_type == 'data': 
+    print(2)
+    if path_type == 'data' or path_type == 'lawnmower': 
         print("Mean Square Error X: ", np.mean((q_history[:, 0] - bt_history[:, 0])**2))
         print("Mean Square Error Y: ", np.mean((q_history[:, 1] - bt_history[:, 1])**2))
         fig2 = plt.figure()
@@ -484,7 +497,6 @@ if __name__ == "__main__":
         ax1.legend()
         for ob in obs:
             ax1.add_patch(plt.Circle((ob[0], ob[1]), radius=ob[2], fc='r'))
-
 
     # Figure for animation
     fig6 = plt.figure()

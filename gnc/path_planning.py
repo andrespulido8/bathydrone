@@ -4,18 +4,18 @@ import numpy as np
 
 # TODO: change variable names to understand what they are for
 
-#enter sp1 as [x,y]
-#enter sp2 as [x,y]
 class pp:
-    """TODO: describe the class here"""
-    def __init__(self,sp1,sp2,dx,dy, is_plot=False):
+    """TODO: describe the class here. Inputs and ouputs"""
+    #enter sp1 as [x,y]
+    #enter sp2 as [x,y]
+    def __init__(self,sp1=110,sp2=60,dy=40, is_plot=False):
         self.sp1=sp1
         self.sp2=np.transpose(sp2)
         self.sp=[sp1,sp2]
-        self.dx=dx
         self.dy=dy
         self.deltax=1
         self.is_plot=is_plot
+        self.dr = 15
         
     def path(self):
         """TODO: describe the function here with inputs
@@ -28,10 +28,6 @@ class pp:
         self.sp4=[self.sp1[0],self.sp1[1]+self.y_distance]
         self.square=[self.sp1,self.sp2,self.sp3,self.sp4]
 
-        #if self.x_distance % self.dx == 0 and self.y_distance % dy==0:
-           # print("Distance is divisible")
-            
-          
         S=[]
 
         h_arr=np.arange(self.sp1[0],self.sp3[0],self.dy) #circle case
@@ -48,7 +44,7 @@ class pp:
            
 
         # TODO: do not have an overlap of green with red and green with blue points
-            
+        # TODO: get rid of all the lists by preallocating memory of the np arrays
         xi = []
         yi = []
         xT = []
@@ -73,7 +69,7 @@ class pp:
 
                 x0 = (h_arr[ii] - r)
                 x1 = (h_arr[ii] + r)
-                xhh = np.linspace(x0, x1, 5)  
+                xhh = np.linspace(x0, x1, self.dr)  
                 yhh = k + np.sqrt(r**2 - (xhh - h_arr[ii])**2)  
                 xh.append(xhh+(self.dy/4))
                 yh.append(yhh)
@@ -98,7 +94,8 @@ class pp:
                 if ii < len(i_arr) - 1:
                     x0 = (i_arr[ii] - r)
                     x1 = (i_arr[ii] + r)
-                    xii = np.linspace(x0, x1, 5)  
+                    # TODO: evenly spaced angles instead of dx (self.dr)
+                    xii = np.linspace(x0, x1, self.dr)  
                     yii = l - np.sqrt(r**2 - (xii - i_arr[ii])**2)  
                     xi.append(xii+(self.dy/4))
                     yi.append(yii)
@@ -126,12 +123,15 @@ class pp:
         self.Y = np.concatenate(Y_list)
         self.X = self.X.reshape((self.X.size))
         self.Y = self.Y.reshape((self.Y.size))
-        print("shape: ", self.X.shape)
-        print("shape: ", self.Y.shape)
+        plt.axis('equal')if self.is_plot else None
+
         plt.show() if self.is_plot else None
+        # TODO: set axis name with dimensions
 
         plt.scatter(self.X, self.Y, c=range(len(self.X)))if self.is_plot else None
-        plt.show()if self.is_plot else None
+        # TODO: title: " trajectory of the robot"
+        plt.axis('equal') if self.is_plot else None
+        plt.show() if self.is_plot else None
 
         return [self.X, self.Y]
     
@@ -177,11 +177,10 @@ class pp:
 
 def main():
     sp1=[0,0]
-    sp2=[160,160]
-    dx=40
-    dy=40
+    sp2=[120,80]
+    dy=60
     is_plot=True
-    planning = pp(sp1,sp2,dx,dy,is_plot)
+    planning = pp(sp1,sp2,dy,is_plot)
     traj = planning.trajectory(2) 
     print(traj.shape)
     return 0

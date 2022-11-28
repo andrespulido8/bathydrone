@@ -40,6 +40,7 @@ r = np.array([off_x, 0, off_z])
 hd = 20*0.681818  # feet to meters
 le = 31*0.681818  # Length of rope
 proj_le = np.sqrt(le**2-hd**2)
+dL = 1  # tolrance lentgh for rope constraint
 
 # Fluid inertial effects
 wm_xu = -6*m  # kg        Increase to damp more the yaw wrt to drone 
@@ -103,6 +104,7 @@ class TetheredDynamics():
         self.hd = hd
         self.proj_le = proj_le
         self.mult = 1
+        self.dL = dL
         
     def step(self, q, v_dr, dt):
         """
@@ -113,7 +115,7 @@ class TetheredDynamics():
         Output:
             q (t+1): State of the boat at the next time step 
         """
-        if npl.norm(q[:2] - self.dr[:2]) >= self.proj_le:
+        if npl.norm(q[:2] - self.dr[:2]) >= self.proj_le+dL:
             v_dr = np.array([0, 0, 0])
 
         R = get_R(q)
@@ -129,7 +131,7 @@ class TetheredDynamics():
         self.u[2] = moments[2]  # apply moment about z
         self.ten[2] = moments[2]
 
-        if npl.norm(q[:2] - self.dr[:2]) < proj_le-2:
+        if npl.norm(q[:2] - self.dr[:2]) < proj_le-dL:
             self.u = np.array([0, 0, 0])
         # Centripetal-coriolis matrix
         C = np.array([
