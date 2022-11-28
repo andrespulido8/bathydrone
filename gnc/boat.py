@@ -13,7 +13,7 @@ from tethered_dynamics import TetheredDynamics
 
 npl = np.linalg
 
-path_type = 'data'  # 'lawnmower', 'line' or 'data','trajetory'
+path_type = 'lawnmower'  # 'lawnmower', 'line', 'trajetory' or 'data'
 
 IS_OPEN_LOOP = False 
 kp = np.array([0.2,0.2,0]) if path_type == 'trajectory' else np.repeat(0.2,2)
@@ -43,8 +43,9 @@ elif path_type == 'lawnmower':
     sp2=[160,160]
     dx=40
     dy=40
-    is_plot=True
-    path = pp(sp1,sp2,dx,dy,is_plot).path()
+    is_plot = False
+    planning = pp(sp1,sp2,dx,dy,is_plot)
+    traj = planning.trajectory(max_vel=saturation[0]) 
 
 tension_magnitudes = [9, 11, 18, 27.5]
 
@@ -58,7 +59,7 @@ goal_buffer = [6, 6, np.inf, np.inf, np.inf, np.inf]
 error_tol = np.copy(goal_buffer)/2
 obs = []
 goal_bias = [0.7, 0.7, 0, 0, 0, 0]
-goal = [20, 20, np.deg2rad(90), 0, 0, 0]
+goal = [25, 25, np.deg2rad(90), 0, 0, 0]
 
 # Definition of collision
 def is_feasible(x, u):
@@ -70,16 +71,22 @@ def is_feasible(x, u):
 def erf(xgoal, x):
     """Returns error e given two states xgoal and x.
     Angle differences are taken properly on SO3."""
-    return xgoal - x
+    e = xgoal - x
+    c = np.cos(x[2])
+    s = np.sin(x[2])
+    cg = np.cos(xgoal[2])
+    sg = np.sin(xgoal[2])
+    e[2] = np.arctan2(sg*c - cg*s, cg*c + sg*s)
+    return e
 
 def lqr(x, u):
     """Returns cost-to-go matrix S and policy matrix K given local state x and effort u.
     """
     global kp, kd
-    kp = np.diag(kp)
-    kd = np.diag(kd)
-    S = np.diag([1, 1, 1, 1, 1, 1])
-    K = np.hstack((kp, kd))
+    kp_mat = np.diag(kp)
+    kd_mat = np.diag(kd)
+    S = np.diag([1, 1, 0.1, 0.1, 0.1, 0.1])
+    K = np.hstack((kp_mat, kd_mat))
     return (S, K)
 
 def get_boat_position(t, ii):
@@ -137,14 +144,14 @@ def pid_controller(t, t_last, q, q_ref , q_dot, q_ref_dot):
     position_error = q_ref - q 
     vel_error = q_ref_dot - q_dot 
     if np.any(kd):
-        feedback_derivative = vel_error*kd 
+        feedback_derivative = vel_error*kd[:2] 
 
     # Integral of error (and clip if too large)
     err_accumulation = err_accumulation + position_error*dt
 
     # Calculate feedback
-    feedback_proportional = position_error*kp 
-    feedback_integral = err_accumulation*ki
+    feedback_proportional = position_error*kp[:2] 
+    feedback_integral = err_accumulation*ki[:2]
     if np.any(kd):
         feedback = feedback_proportional + feedback_derivative + feedback_integral
     else:
@@ -173,6 +180,7 @@ def pid_controller(t, t_last, q, q_ref , q_dot, q_ref_dot):
         print("feedback integral: {}".format(feedback_integral))
         print("command: {}".format(command))
 
+    command = np.array([command[0], command[1], 0])
     return command, feedback_proportional, feedback_integral    
 
 def get_R(q):
@@ -224,7 +232,7 @@ if __name__ == "__main__":
     if path_type == 'line' or path_type == 'lawnmower' or path_type == 'trajectory':
         q0 = np.array([x0, -np.sqrt(dynamics.proj_le**2 - x0**2),
                        0, 0, 0, 0], dtype=np.float64)
-        dynamics.dr = np.array([0, 0, 0], dtype=np.float64)  # [m, m, rad]
+        dr0 = np.array([0, 0, 0], dtype=np.float64)  # [m, m, rad]
     elif path_type == 'data':
         jj = np.argmax(df_dr['time'].to_numpy() >= t0)
         #q0 = np.array([x0 + df_dr['X_m'].iloc[jj],
@@ -232,7 +240,9 @@ if __name__ == "__main__":
         #        0, 0, 0, 0], dtype=np.float64)
         q0 = np.array([df_bt['X_m'].iloc[jj], df_bt['Y_m'].iloc[jj],
                 0, 0, 0, 0], dtype=np.float64)
-        dynamics.dr, _ = get_drone_position(t_last, dynamics.hd, i_last)
+        dr0, _ = get_drone_position(t_last, dynamics.hd, i_last)
+    dynamics.dr = dr0
+    dynamics.mult = 0.5
     q = np.copy(q0)
 
     # Define time domain
@@ -258,20 +268,23 @@ if __name__ == "__main__":
                         (-0.2, 0.2)]
         constraints = lqrrt.Constraints(nstates=nstates, ncontrols=ncontrols,
                                         goal_buffer=goal_buffer, is_feasible=is_feasible)
-        planner = lqrrt.Planner(dynamics, lqr, constraints,
+        planner = lqrrt.Planner(dynamics.step, lqr, constraints,
                                 horizon=2, dt=dt, FPR=0.5,
                                 error_tol=error_tol, erf=erf,
-                                min_time=0.5, max_time=2, max_nodes=1E5,
+                                min_time=1, max_time=2, max_nodes=1E5,
                             goal0=goal)
 
         planner.update_plan(q0, sample_space, goal_bias=goal_bias, finish_on_goal=True)
     
+    dynamics.dr = dr0
+    print("dr0: {}".format(dr0))
     # Integrate dynamics using first-order forward stepping
     for i, t in enumerate(t_arr):
 
-        if df_dr.shape[0] == i:
-            print('End of data')
+        #if df_dr.shape[0] == i:
+        #    print('End of data')
 
+        q_ref = planner.get_state(t) if path_type == 'trajectory' else None
         # Rope length constraint
         if npl.norm(q[:2] - dynamics.dr[:2]) <= dynamics.proj_le or t == 0.0:
             if IS_OPEN_LOOP:
@@ -280,21 +293,30 @@ if __name__ == "__main__":
                 if path_type == 'data':
                     # q_ref is boat position from the data
                     q_ref, ii_last = get_boat_position(t, ii_last)
-
                     # closed loop controller
                     q_dot = 0
                     q_ref_dot = 0
-                    v_dr, p_cmd, i_cmd = pid_controller(t, t_last, q[:2], q_ref[:2], q_dot, q_ref_dot)
                 elif path_type == 'trajectory':
                     # Planner's decision
-                    q_ref = planner.get_state(t)
-                    uref = planner.get_effort(t)
+                    u_ref = planner.get_effort(t)
 
                     # Controller's decision
-                    v_dr = lqr(q, uref)[1].dot(erf(q_ref, np.copy(q)))
+                    kk = lqr(q, u_ref)[1]
+                    ee = erf(q_ref, np.copy(q))
+                    v_dr = kk.dot(ee)
+                    #print("lqr: ", lqr(q, uref)[1])
+                    #print("erf: ", erf(q_ref, np.copy(q)))
+                    #print("v_dr: ", v_dr)
+                elif path_type == 'lawnmower':
+                    q_ref = traj[ii_last]
+                    ee = erf(q_ref, np.copy(q))
+                    if npl.norm(ee[:2]) < tolerance*2: 
+                        ii_last = ii_last + 1
+
+                v_dr, p_cmd, i_cmd = pid_controller(t, t_last, q[:2], q_ref[:2], q_dot, q_ref_dot)
             t_last += dt
         else:
-            v_dr = np.array([0,0])
+            v_dr = np.array([0,0,0])
 
         q_history[i] = q
         dr_history[i] = dynamics.dr
@@ -302,7 +324,7 @@ if __name__ == "__main__":
         u_world_history[i] = dynamics.ten
         head_dr[i] = np.degrees(np.arctan2(dynamics.diff_pos[1],dynamics.diff_pos[0]))
         if not IS_OPEN_LOOP:
-            if path_type == 'data':
+            if path_type == 'data' or path_type == 'lawnmower':
                 bt_history[i] = q_ref
                 dr_v_hist[i] = v_dr
                 p_cmd_hist[i] = p_cmd
@@ -456,9 +478,10 @@ if __name__ == "__main__":
                 ax1.plot((x_seq[:, dx]), (x_seq[:, dy]), color='r', zorder=2)
             else:
                 ax1.plot((x_seq[:, dx]), (x_seq[:, dy]), color='0.75', zorder=1)
-        ax1.scatter(planner.tree.state[0, dx], planner.tree.state[0, dy], color='b', s=48)
-        ax1.scatter(planner.tree.state[planner.node_seq[-1], dx], planner.tree.state[planner.node_seq[-1], dy], color='r', s=48)
-        ax1.scatter(goal[dx], goal[dy], color='g', s=48)
+        ax1.scatter(planner.tree.state[0, dx], planner.tree.state[0, dy], color='b', s=48, label='Start')
+        ax1.scatter(planner.tree.state[planner.node_seq[-1], dx], planner.tree.state[planner.node_seq[-1], dy], color='r', s=48, label='sequence')
+        ax1.scatter(goal[dx], goal[dy], color='g', s=48, label='Goal')
+        ax1.legend()
         for ob in obs:
             ax1.add_patch(plt.Circle((ob[0], ob[1]), radius=ob[2], fc='r'))
 
@@ -473,15 +496,18 @@ if __name__ == "__main__":
     ax6.grid(True)
 
     # Points and lines for representing positions and headings
-    pthick = 100
+    pthick = 100   
     lthick = 2
     llen = 2.5
+    rope = np.array([dr_history[0, 0] - q_history[0, 0],
+                    dr_history[0, 1] - q_history[0, 1],])
+    rope = rope* dynamics.proj_le / np.linalg.norm(rope) 
     p = ax6.scatter(q_history[0, 0], q_history[0, 1], color='k', s=pthick, label='simulated boat')
     h = ax6.plot([q_history[0, 0], q_history[0, 0] + llen*np.cos(q_history[0, 2])],
                  [q_history[0, 1], q_history[0, 1] + llen*np.sin(q_history[0, 2])], color='k', linewidth=lthick)
     pref = ax6.scatter(dr_history[0, 0], dr_history[0, 1], color='b', s=pthick, label='drone')
-    href = ax6.plot([dr_history[0, 0], dr_history[0, 0] - 0.8*llen*u_world_history[0, 0]],
-                    [dr_history[0, 1], dr_history[0, 1] - 0.8*llen*u_world_history[0, 1]], color='r', linewidth=lthick)
+    href = ax6.plot([dr_history[0, 0], dr_history[0, 0] + rope[0]], \
+                    [dr_history[0, 1], dr_history[0, 1] + rope[1]], color='r', linewidth=lthick)
     pact = ax6.scatter(bt_history[0, 0], bt_history[0, 1], color='c', s=pthick, label='boat data')
 
     # Plot entirety of actual trajectory

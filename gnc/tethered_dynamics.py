@@ -102,6 +102,7 @@ class TetheredDynamics():
         self.ten_mag = ten_mag
         self.hd = hd
         self.proj_le = proj_le
+        self.mult = 1
         
     def step(self, q, v_dr, dt):
         """
@@ -139,7 +140,7 @@ class TetheredDynamics():
 
         # Drag matrix
         D = np.array([
-                      [-d_xuu*abs(q[3]),                                    0,                                    0],
+                      [-d_xuu*abs(q[3])*self.mult,                                    0,                                    0],
                       [               0, -(d_yvv*abs(q[4]) + d_yrv*abs(q[5])), -(d_yvr*abs(q[4]) + d_yrr*abs(q[5]))],
                       [               0, -(d_nvv*abs(q[4]) + d_nrv*abs(q[5])), -(d_nvr*abs(q[4]) + d_nrr*abs(q[5]))]
                     ])
