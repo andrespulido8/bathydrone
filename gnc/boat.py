@@ -1,28 +1,6 @@
 #!/usr/bin/env python3
-"""
-Contains a model of a 3DOF marine ship. Supplies parameter values,
-a function for the full nonlinear dynamic. Running this script as
-__main__ will present a quick open-loop simulation.
-
-Boat State is: [x_world_position (m),
-                y_world_position (m),
-                heading_angle_from_x (rad),
-                x_body_velocity (m/s),
-                y_body_velocity (m/s),
-                yaw_rate (rad/s)]
-
-Force u is: [x_body_force (N),
-             y_body_force (N),
-             z_torque (N*m)]
-
-Input dr is: [drone_x_position (m),
-              drone_y_position (m)]
-
-See:
-T. I. Fossen, Handbook of Marine Craft Hydrodynamics
-and Motion Control. Wiley, 2011. Chapter 13.
-
-Partial code taken from https://github.com/jnez71/misc
+""" Path and trajectory planning and controls for the tethered boat
+    simulation
 """
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
@@ -31,14 +9,15 @@ import pandas as pd
 
 from lqRRT import lqrrt
 from path_planning import pp
+from tethered_dynamics import TetheredDynamics
 
 npl = np.linalg
 
 path_type = 'data'  # 'lawnmower', 'line' or 'data'
 
 IS_OPEN_LOOP = False 
-kp = np.repeat(0.23, 2)
-ki = np.repeat(0.000005, 2)
+kp = np.repeat(0.15, 2)
+ki = np.repeat(0.00005, 2)
 kd = np.repeat(0, 2)
 err_accumulation = np.zeros(2)
 max_ve = 4*0.44704  # mph to m/s 
@@ -67,95 +46,7 @@ elif path_type == 'lawnmower':
     is_plot=True
     path = pp(sp1,sp2,dx,dy,is_plot).path()
 
-# Offset on the tension application point [m]
-off_x = 0.1905  # measured from the bathydrone vehicle
-off_z = 0.1016
-r = np.array([off_x, 0, off_z])
-# height of drone above water
-hd = 20*0.681818  # feet to meters
-le = 31*0.681818  # Length of rope
-proj_le = np.sqrt(le**2-hd**2)
-
-# Bathydrone specific mass, inertia and dimensions
-m = 6.342  # kg
-xg = 0  # COM x coord in bocy fixed frame [m]
-Iz =  4  # mass moment of intertia from SolidWorks 
 tension_magnitudes = [9, 11, 18, 27.5]
-
-# Fluid inertial effects
-wm_xu = -6*m  # kg        Increase to damp more the yaw wrt to drone 
-wm_yv = -0.5*m  # kg       #    
-wm_yr = -0.5*m*xg  # kg*m
-wm_nr = -0.25*Iz  # kg*m**2  #
-
-# Drag
-d_xuu = -5.75 #0.25 * wm_xu  # N/(m/s)**2
-d_yvv = -7 #0.25 * wm_yv  # N/(m/s)**2
-d_nrr = -7 #0.25 * (wm_nr + wm_yr)  # (N*m)/(rad/s)**2
-
-# Cross-flow
-d_yrr = 0.25 * wm_yr  # N/(rad/s)**2
-d_yrv = 0.25 * wm_yr  # N/(m*rad/s**2)
-d_yvr = 0.25 * wm_yv  # N/(m*rad/s**2)
-d_nvv = 0.25 * d_yvv  # (N*m)/(m/s)**2  #
-d_nrv = 0.25 * d_yrv  # (N*m)/(m*rad/s**2)  #
-d_nvr = 0.25 * (wm_nr + wm_yv)  # (N*m)/(m*rad/s**2)  #
-
-# EQUATIONS OF MOTION
-
-# Inertial matrix, independent of state
-M = np.array([
-              [m - wm_xu,            0,            0],
-              [        0,    m - wm_yv, m*xg - wm_yr],
-              [        0, m*xg - wm_yr,   Iz - wm_nr]
-            ])
-Minv = npl.inv(M)
-
-
-def dynamics(q, u):
-    """
-    Dynamic model of the boat. Returns the derivatives of the state q based on the control input u
-    Input: 
-        q: State of the boat. Vector of position, orientation and velocites
-        u: control input
-    Output:
-        q_dot: time rate of change of the state. Velocities and acceleration 
-    """
-    # Centripetal-coriolis matrix
-    C = np.array([
-                  [                                     0,                0, (wm_yr - m*xg)*q[5] + (wm_yv - m)*q[4]],
-                  [                                     0,                0,                       (m - wm_xu)*q[3]],
-                  [(m*xg - wm_yr)*q[5] + (m - wm_yv)*q[4], (wm_xu - m)*q[3],                                      0]
-                ])
-
-    # Drag matrix
-    D = np.array([
-                  [-d_xuu*abs(q[3]),                                    0,                                    0],
-                  [               0, -(d_yvv*abs(q[4]) + d_yrv*abs(q[5])), -(d_yvr*abs(q[4]) + d_yrr*abs(q[5]))],
-                  [               0, -(d_nvv*abs(q[4]) + d_nrv*abs(q[5])), -(d_nvr*abs(q[4]) + d_nrr*abs(q[5]))]
-                ])
-
-    R = get_R(q)
-
-    # M*vdot + C*v + D*v = u  and  pdot = R*v
-    dyn = np.concatenate((R.dot(q[3:]), Minv.dot(u - (C + D).dot(q[3:]))))
-    return dyn
-
-def unwrap(ang):
-    "Returns an angle on [-pi, pi]"
-    return np.mod(ang+np.pi, 2*np.pi) - np.pi
-
-def qplus(q, dq):
-    "Adds a perturbation to a state, q [+] dq"
-    qp = q + dq
-    qp[2] = unwrap(qp[2])
-    return qp
-
-def qminus(ql, qr):
-    "Subtracts two states, ql [-] qr"
-    dq = ql - qr
-    dq[2] = unwrap(dq[2])
-    return dq
 
 def get_boat_position(t, ii):
     """
@@ -292,13 +183,14 @@ if __name__ == "__main__":
     store_data = False  # should data be stored into a .mat?
     outline_path = True  # show path outline on animation?
 
+    dynamics = TetheredDynamics(ten_mag=ten_mag)
     # Initial condition
     # State: [m, m, rad, m/s, m/s, rad/s]
     x0 = -14
     if path_type == 'line' or path_type == 'lawnmower':
-        q0 = np.array([x0, -np.sqrt(proj_le**2 - x0**2),
+        q0 = np.array([x0, -np.sqrt(dynamics.proj_le**2 - x0**2),
                        0, 0, 0, 0], dtype=np.float64)
-        dr = np.array([0, 0, 0], dtype=np.float64)  # [m, m, rad]
+        dynamics.dr = np.array([0, 0, 0], dtype=np.float64)  # [m, m, rad]
     elif path_type == 'data':
         jj = np.argmax(df_dr['time'].to_numpy() >= t0)
         #q0 = np.array([x0 + df_dr['X_m'].iloc[jj],
@@ -306,9 +198,8 @@ if __name__ == "__main__":
         #        0, 0, 0, 0], dtype=np.float64)
         q0 = np.array([df_bt['X_m'].iloc[jj], df_bt['Y_m'].iloc[jj],
                 0, 0, 0, 0], dtype=np.float64)
-        dr, _ = get_drone_position(t_last, hd, i_last)
+        dynamics.dr, _ = get_drone_position(t_last, dynamics.hd, i_last)
     q = np.copy(q0)
-    u = np.array([0, 0, 0], dtype=np.float64)  # [N, N, N*m]
 
     # Define time domain
     t_arr = np.arange(t0, T, dt)
@@ -330,11 +221,10 @@ if __name__ == "__main__":
         if df_dr.shape[0] == i:
             print('End of data')
 
-        R = get_R(q)
         # Rope length constraint
-        if npl.norm(q[:2] - dr[:2]) <= proj_le or t == 0.0:
+        if npl.norm(q[:2] - dynamics.dr[:2]) <= dynamics.proj_le or t == 0.0:
             if IS_OPEN_LOOP:
-                dr, i_last = get_drone_position(t_last, hd, i_last)
+                dynamics.dr, i_last = get_drone_position(t_last, dynamics.hd, i_last)
             else:
                 # q_ref is boat position from the data
                 q_ref, ii_last = get_boat_position(t, ii_last)
@@ -343,28 +233,15 @@ if __name__ == "__main__":
                 q_dot = 0
                 q_ref_dot = 0
                 v_dr, p_cmd, i_cmd = pid_controller(t, t_last, q[:2], q_ref[:2], q_dot, q_ref_dot)
-                dr[:2] = dr[:2] + v_dr * dt
             t_last += dt
+        else:
+            v_dr = np.array([0,0])
         
-        app_point = np.array([q[0], q[1], 0]) + R.dot(r) # world coord
-        diff_pos = dr - app_point
-        diff_pos = diff_pos/npl.norm(diff_pos)
-
-        ten = ten_mag*diff_pos
-        ten_body = R.T.dot(ten)
-        moments = np.cross(r, ten_body)
-        u[:2] = ten_body[:2]
-        u[2] = moments[2]  # apply moment about z
-        ten[2] = moments[2]
-        
-        if npl.norm(q[:2] - dr[:2]) < proj_le-2:
-            u = np.array([0, 0, 0])
-
         q_history[i] = q
-        dr_history[i] = dr
-        u_history[i] = u
-        u_world_history[i] = ten
-        head_dr[i] = np.degrees(np.arctan2(diff_pos[1],diff_pos[0]))
+        dr_history[i] = dynamics.dr
+        u_history[i] = dynamics.u
+        u_world_history[i] = dynamics.ten
+        head_dr[i] = np.degrees(np.arctan2(dynamics.diff_pos[1],dynamics.diff_pos[0]))
         if not IS_OPEN_LOOP:
             bt_history[i] = q_ref 
             dr_v_hist[i] = v_dr
@@ -372,7 +249,7 @@ if __name__ == "__main__":
             i_cmd_hist[i] = i_cmd
 
         # Step forward, qnext = qlast + qdot*dt
-        q = qplus(q, dynamics(q, u)*dt)
+        q = dynamics.step(q, v_dr, dt)
     
     ## PLOTS
 
@@ -461,7 +338,7 @@ if __name__ == "__main__":
     ax.set_title('Norm of Distance (m)', fontsize=16)
     ax.plot(t_arr, np.sqrt((q_history[:, 0] - dr_history[:, 0])**2 + (
         q_history[:, 1] - dr_history[:, 1])**2), 'k')
-    ax.plot([t_arr[0], t_arr[-1]], [proj_le, proj_le], '-r', label='rope length')
+    ax.plot([t_arr[0], t_arr[-1]], [dynamics.proj_le, dynamics.proj_le], '-r', label='rope length')
     ax.set_xlabel('Time (s)')
     ax.legend()
     ax.grid(True)
