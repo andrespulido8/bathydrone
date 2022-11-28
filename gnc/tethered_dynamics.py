@@ -115,6 +115,7 @@ class TetheredDynamics():
         Output:
             q (t+1): State of the boat at the next time step 
         """
+        # Rope length constraint
         if npl.norm(q[:2] - self.dr[:2]) >= self.proj_le+dL:
             v_dr = np.array([0, 0, 0])
 
@@ -131,6 +132,7 @@ class TetheredDynamics():
         self.u[2] = moments[2]  # apply moment about z
         self.ten[2] = moments[2]
 
+        # Rope length constraint
         if npl.norm(q[:2] - self.dr[:2]) < proj_le-dL:
             self.u = np.array([0, 0, 0])
         # Centripetal-coriolis matrix
