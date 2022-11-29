@@ -13,18 +13,20 @@ from tethered_dynamics import TetheredDynamics
 
 npl = np.linalg
 
-path_type = 'trajectory'  # 'lawnmower', 'line', 'trajetory' or 'data'
+IS_OPEN_LOOP = False
+path_type = 'data'  # 'lawnmower', 'line', 'trajetory' or 'data'
+# data can be open or closed loop
 
-IS_OPEN_LOOP = False 
+# Controller parameters
 kp = np.array([0.2,0.2,0]) if path_type == 'trajectory' else np.repeat(0.2,2)
-ki = np.array([0.001, 0.001, 0.0]) if path_type == 'trajectory' else np.repeat(0.001,2)
+ki = np.array([0.01, 0.01, 0.0]) if path_type == 'trajectory' else np.repeat(0.01,2)
 kd = np.repeat(0.1, 3) if path_type == 'trajectory' else np.repeat(0.0,2)
 err_accumulation = np.zeros(2)
-max_ve = 4*0.44704  # mph to m/s 
+#max_ve = 4*0.44704  # mph to m/s 
 saturation = np.repeat(1.8, 2)  # max vel of drone [m/s]
 tolerance = 0.2  # meters
-traj_tolerance = 20.
-err_reset_dist = 30
+traj_tolerance = 15.
+err_reset_dist = 50
 is_debug = False 
 
 if path_type == 'data':
@@ -110,8 +112,6 @@ def get_boat_position(t, ii):
         x = df_bt['X_m'].iloc[ii]
         y = df_bt['Y_m'].iloc[ii]
         return np.array([x, y, 0]), ii
-    elif path_type == 'lawnmower':
-        path = 0  # TODO: implement
 
 def get_drone_position(t, hd, ii):
     """
@@ -134,11 +134,10 @@ def get_drone_position(t, hd, ii):
         y = df_dr['Y_m'].iloc[ii]
         return np.array([x, y, hd]), ii
 
-def pid_controller(t, t_last, q, q_ref , q_dot, q_ref_dot):
+def pid_controller(t, t_last, q, q_ref , q_dot, q_ref_dot, err_accumulation):
     """ calculate the control input (velocity) based on the desired 
         trajectory
     """
-    global err_accumulation
     command = np.array([0, 0])
     dt = np.array(t - t_last)
 
@@ -171,7 +170,7 @@ def pid_controller(t, t_last, q, q_ref , q_dot, q_ref_dot):
         command[0] = 0
     elif np.abs(position_error[0]) > err_reset_dist or np.abs(position_error[1]) > err_reset_dist:
         # delete accumulated error if error is large 
-        err_accumulation /= 5
+        err_accumulation /= 2
 
     if is_debug:
         print("Feedback proportional: {}".format(
@@ -183,7 +182,7 @@ def pid_controller(t, t_last, q, q_ref , q_dot, q_ref_dot):
         print("command: {}".format(command))
 
     command = np.array([command[0], command[1], 0])
-    return command, feedback_proportional, feedback_integral    
+    return command, feedback_proportional, feedback_integral, err_accumulation   
 
 def get_R(q):
     """ Rotation matrix (orientation, converts body to world)"""
@@ -196,10 +195,11 @@ def get_R(q):
 # SIMULATION
 if __name__ == "__main__":
 
+    data_file_index = 1
     if path_type == 'data':
         # Choose one option from the datasets (drones and echos)
-        df_dr = drones[1]
-        df_bt = echos[1]
+        df_dr = drones[data_file_index]
+        df_bt = echos[data_file_index]
 
         # Fix delta in time
         #kk = np.argmax(df_dr['Y_m'].to_numpy() <= df_bt['Y_m'].to_numpy()[0])
@@ -208,7 +208,7 @@ if __name__ == "__main__":
         df_dr["time"] = df_dr["time"] - df_dr["time"].to_numpy()[76]
         df_dr = df_dr.drop(df_dr.index[range(0, 76)])
 
-    ten_mag = tension_magnitudes[1]  # choose magnitude depending on the drones dataset 
+    ten_mag = tension_magnitudes[data_file_index]  # choose magnitude depending on the drones dataset 
     i_last = 0
     ii_last = 0
     t_last = 0
@@ -224,9 +224,9 @@ if __name__ == "__main__":
     # State: [m, m, rad, m/s, m/s, rad/s]
     x0 = -5
     if path_type == 'line' or path_type == 'lawnmower' or path_type == 'trajectory':
-        q0 = np.array([x0, -np.sqrt(dynamics.proj_le**2 - x0**2),
+        dr0 = np.array([2, 10, 0], dtype=np.float64)  # [m, m, rad]
+        q0 = np.array([dr0[0] + x0, dr0[1] - np.sqrt(dynamics.proj_le**2 - x0**2),
                        0, 0, 0, 0], dtype=np.float64)
-        dr0 = np.array([0, 0, 0], dtype=np.float64)  # [m, m, rad]
     elif path_type == 'data':
         jj = np.argmax(df_dr['time'].to_numpy() >= 0)
         #q0 = np.array([x0 + df_dr['X_m'].iloc[jj],
@@ -264,7 +264,8 @@ if __name__ == "__main__":
         T = 150  # s
         dt = 0.001
     elif path_type == 'lawnmower':
-        T = traj.shape[0]*6.6/2  # s
+        dist_between_pts = 7
+        T = traj.shape[0]*dist_between_pts/2  # s (decrease dist_between_pts if T is too large)
         dt = 0.01
     elif path_type == 'data':
         T = np.min([df_bt['time1'].to_numpy()[-1],df_dr['time'].to_numpy()[-1]])
@@ -292,11 +293,16 @@ if __name__ == "__main__":
 
         q_dot = q[3:]
         if IS_OPEN_LOOP:
-            dynamics.dr, i_last = get_drone_position(t_last, dynamics.hd, i_last)
+            if npl.norm(q[:2] - dynamics.dr[:2]) <= dynamics.proj_le+dynamics.dL:
+                dynamics.dr, i_last = get_drone_position(t_last, dynamics.hd, i_last)
+                t_last += dt
+            q_ref, ii_last = get_boat_position(t, ii_last)
+            v_dr = None
         else:
             if path_type == 'data':
                 # q_ref is boat position from the data
                 q_ref, ii_last = get_boat_position(t, ii_last)
+                q_ref_dot = 0
             elif path_type == 'trajectory':
                 # Planner's decision
                 u_ref = planner.get_effort(t)
@@ -320,9 +326,11 @@ if __name__ == "__main__":
                 if npl.norm(ee[:2]) < traj_tolerance: 
                     ii_last = ii_last + 1
 
-            v_dr, p_cmd, i_cmd = pid_controller(t, t_last, q[:2], q_ref[:2], q_dot, q_ref_dot)
-        t_last += dt
+            v_dr, p_cmd, i_cmd, err_accumulation = pid_controller(t, t_last, q[:2], q_ref[:2],
+                                                             q_dot, q_ref_dot, err_accumulation)
+            t_last += dt
 
+        bt_history[i] = q_ref
         q_history[i] = q
         dr_history[i] = dynamics.dr
         u_history[i] = dynamics.u
@@ -507,15 +515,15 @@ if __name__ == "__main__":
     pthick = 100   
     lthick = 2
     llen = 2.5
-    rope = np.array([dr_history[0, 0] - q_history[0, 0],
-                    dr_history[0, 1] - q_history[0, 1],])
+    rope = np.array([dr_history[:, 0] - q_history[:, 0],
+                    dr_history[:, 1] - q_history[:, 1],])
     rope = rope* dynamics.proj_le / np.linalg.norm(rope) 
     p = ax6.scatter(q_history[0, 0], q_history[0, 1], color='k', s=pthick, label='simulated boat')
     h = ax6.plot([q_history[0, 0], q_history[0, 0] + llen*np.cos(q_history[0, 2])],
                  [q_history[0, 1], q_history[0, 1] + llen*np.sin(q_history[0, 2])], color='k', linewidth=lthick)
     pref = ax6.scatter(dr_history[0, 0], dr_history[0, 1], color='b', s=pthick, label='drone')
-    href = ax6.plot([dr_history[0, 0], dr_history[0, 0] + rope[0]], \
-                    [dr_history[0, 1], dr_history[0, 1] + rope[1]], color='r', linewidth=lthick)
+    href = ax6.plot([dr_history[0, 0], dr_history[0, 0] + rope[0,0]], \
+                    [dr_history[0, 1], dr_history[0, 1] + rope[0,1]], color='r', linewidth=lthick)
     pact = ax6.scatter(bt_history[0, 0], bt_history[0, 1], color='c', s=pthick, label='boat data')
 
     # Plot entirety of actual trajectory
@@ -537,6 +545,8 @@ if __name__ == "__main__":
         h[0].set_data([q_history[i, 0], q_history[i, 0] + llen*np.cos(q_history[i, 2])],
                       [q_history[i, 1], q_history[i, 1] + llen*np.sin(q_history[i, 2])])
         pref.set_offsets((dr_history[i, 0], dr_history[i, 1]))
+        href[0].set_data([dr_history[i, 0], dr_history[i, 0] + rope[:,0]], \
+                         [dr_history[i, 1], dr_history[i, 1] + rope[:,1]])
         href[0].set_data([dr_history[i, 0], dr_history[i, 0] - 0.8*llen*u_world_history[i, 0]],
                          [dr_history[i, 1], dr_history[i, 1] - 0.8*llen*u_world_history[i, 1]])
         pact.set_offsets((bt_history[i, 0], bt_history[i, 1]))

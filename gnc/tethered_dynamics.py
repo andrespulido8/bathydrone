@@ -120,7 +120,7 @@ class TetheredDynamics():
             v_dr = np.array([0, 0, 0])
 
         R = get_R(q)
-        self.dr[:2] = self.dr[:2] + v_dr[:2] * dt
+        self.dr[:2] = self.dr[:2] + v_dr[:2] * dt  if v_dr is not None else self.dr[:2]
         app_point = np.array([q[0], q[1], 0]) + R.dot(r) # world coord
         self.diff_pos = self.dr - app_point
         self.diff_pos = self.diff_pos/npl.norm(self.diff_pos)

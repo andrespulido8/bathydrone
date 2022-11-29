@@ -15,7 +15,7 @@ class pp:
         self.dy=dy
         self.deltax=1
         self.is_plot=is_plot
-        self.dr = 15
+        self.dr = 6
         
     def path(self):
         """TODO: describe the function here with inputs
@@ -128,11 +128,6 @@ class pp:
         plt.show() if self.is_plot else None
         # TODO: set axis name with dimensions
 
-        plt.scatter(self.X, self.Y, c=range(len(self.X)))if self.is_plot else None
-        # TODO: title: " trajectory of the robot"
-        plt.axis('equal') if self.is_plot else None
-        plt.show() if self.is_plot else None
-
         return [self.X, self.Y]
     
     def heading(self):
@@ -173,15 +168,26 @@ class pp:
         d = self.velocity()
         return np.array([X, Y, h, d[:,0], d[:,1], np.repeat(0, len(X))]).T
 
-    
+    def plot(self):
+        """Plots the path"""
+        X, Y = self.path()
+        plt.scatter(self.X+10, self.Y, c='r')
+        # Plot rectangle boundary knowing sp1 and sp2
+        plt.plot([self.sp1[0], self.sp2[0], self.sp2[0], self.sp1[0], self.sp1[0]],
+             [self.sp1[1], self.sp1[1],self.sp2[1], self.sp2[1],self.sp1[1]], '--k')
+        # TODO: title: " trajectory of the robot"
+        plt.axis('equal') 
+        plt.show() 
+
 
 def main():
     sp1=[0,0]
-    sp2=[120,80]
-    dy=60
+    sp2=[170,80]
+    dy=40
     is_plot=True
     planning = pp(sp1,sp2,dy,is_plot)
     traj = planning.trajectory(2) 
+    planning.plot()
     print(traj.shape)
     return 0
 
