@@ -9,11 +9,12 @@ import pandas as pd
 from lqRRT import lqrrt
 from path_planning import pp
 from tethered_dynamics import TetheredDynamics
+from traj_planning import pdRRT_Node
 
 npl = np.linalg
 
 IS_OPEN_LOOP = False
-path_type = "obstacle"  # 'lawnmower', 'line', 'obstacle' or 'data'
+path_type = "trajectory"  # 'lawnmower', 'line', 'obstacle', 'trajectory' or 'data'
 # data can be open or closed loop
 
 # Controller parameters
@@ -40,7 +41,7 @@ if path_type == "data":
     drone_12 = pd.read_csv("./traj_data/drone_traj_12.csv")
     echos = [echo_3_051722, echo_6_051722, echo_9_051722, echo_12_051722]
     drones = [drone_3, drone_6, drone_9, drone_12]
-elif path_type == "lawnmower":
+elif path_type == "lawnmower" or path_type == "trajectory":
     sp1 = [0, 0]
     sp2 = [120, 80]
     dy = 60
@@ -58,14 +59,32 @@ boat_length = 1  # m
 boat_width = 0.5  # m
 goal_buffer = [2, 2, np.inf, np.inf, np.inf, np.inf]
 error_tol = np.copy(goal_buffer) / 2
-obs = []
-obs = np.array(
-    [
-        [3, 2, 2],
-    ]
-)
+if path_type == "obstacle":
+    obs = np.array(
+        [
+            [3, 2, 2],
+        ]
+    )
+    goal = [10, 10, np.deg2rad(90), 0, 0, 0]
+elif path_type == "trajectory":
+    obs = []
 goal_bias = [0.3, 0.3, 0, 0, 0, 0]
-goal = [10, 10, np.deg2rad(90), 0, 0, 0]
+
+
+def gen_ss(seed, goal, buff=[1] * 4):
+    """
+    Returns a sample space given a seed state, goal state, and buffer.
+
+    """
+    return [
+        (min([seed[0], goal[0]]) - buff[0], max([seed[0], goal[0]]) + buff[1]),
+        (min([seed[1], goal[1]]) - buff[2], max([seed[1], goal[1]]) + buff[3]),
+        (-np.pi, np.pi),
+        (-0.0, 2),
+        (-0.2, 0.2),
+        (-0.8, 0.8),
+    ]
+
 
 # Definition of collision
 def is_feasible(x, u):
@@ -232,8 +251,14 @@ if __name__ == "__main__":
     # Initial condition
     # State: [m, m, rad, m/s, m/s, rad/s]
     x0 = -5
-    if path_type == "line" or path_type == "lawnmower" or path_type == "obstacle":
-        dr0 = np.array([2, 10, 0], dtype=np.float64)  # [m, m, rad]
+    if (
+        path_type == "line"
+        or path_type == "lawnmower"
+        or path_type == "obstacle"
+        or path_type == "trajectory"
+    ):
+        y0 = 5 if path_type == "obstacle" else 30
+        dr0 = np.array([2, y0, 0], dtype=np.float64)  # [m, m, rad]
         q0 = np.array(
             [
                 dr0[0] + x0,
@@ -245,6 +270,8 @@ if __name__ == "__main__":
             ],
             dtype=np.float64,
         )
+        goal_counter = 0
+        is_same_goal = False
     elif path_type == "data":
         jj = np.argmax(df_dr["time"].to_numpy() >= 0)
         # q0 = np.array([x0 + df_dr['X_m'].iloc[jj],
@@ -255,23 +282,22 @@ if __name__ == "__main__":
         )
         dr0, _ = get_drone_position(t_last, dynamics.hd, i_last)
     dynamics.dr = np.copy(dr0)
+    # TODO: There might be a problem with the internal dr to the dynamics
     q = np.copy(q0)
 
-    if path_type == "obstacle":
-        sample_space = [
-            (q0[0], goal[0]),
-            (q0[1], goal[1]),
-            (-np.pi, np.pi),
-            (0, saturation[0]),
-            (-saturation[1] / 1.5, saturation[1] / 1.5),
-            (-0.8, 0.8),
-        ]
+    if path_type == "obstacle" or path_type == "trajectory":
         constraints = lqrrt.Constraints(
             nstates=nstates,
             ncontrols=ncontrols,
             goal_buffer=goal_buffer,
             is_feasible=is_feasible,
         )
+        if path_type == "obstacle":
+            goal0 = goal
+        else:
+            goal0 = traj[0, :]
+            # rrt = pdRRT_Node()
+        sample_space = gen_ss(q0, goal0, [1, 1, 0, 0, 0, 0])
         planner = lqrrt.Planner(
             dynamics.step,
             lqr,
@@ -282,10 +308,12 @@ if __name__ == "__main__":
             error_tol=error_tol,
             erf=erf,
             min_time=1,
-            max_time=40,
+            max_time=20,
             max_nodes=1e5,
-            goal0=goal,
+            goal0=goal0,
         )
+        t_delta = 5
+        real_tol = [2, 2, np.deg2rad(20), np.inf, np.inf, np.inf]
 
         planner.update_plan(q0, sample_space, goal_bias=goal_bias, finish_on_goal=True)
 
@@ -297,7 +325,7 @@ if __name__ == "__main__":
     if path_type == "line":
         T = 150  # s
         dt = 0.001
-    elif path_type == "lawnmower":
+    elif path_type == "lawnmower" or path_type == "trajectory":
         dist_between_pts = 7
         T = (
             traj.shape[0] * dist_between_pts / 2
@@ -315,7 +343,7 @@ if __name__ == "__main__":
 
     # Preallocate results memory
     q_history = np.zeros((len(t_arr), len(q)))
-    bt_history = np.zeros((len(t_arr), int(len(q))))
+    bt_history = np.zeros((len(t_arr), len(q)))
     dr_history = np.zeros((len(t_arr), int(len(q) / 2)))
     u_history = np.zeros((len(t_arr), int(len(q) / 2)))
     u_world_history = np.zeros((len(t_arr), int(len(q) / 2)))
@@ -356,12 +384,47 @@ if __name__ == "__main__":
                 if traj.shape[0] == ii_last:
                     print("End of data. Time=", t)
                     break
-                q_ref = traj[ii_last][:3]
+                q_ref = traj[ii_last]
                 q_ref_dot = traj[ii_last][3:]
-                ee = erf(q_ref, np.copy(q[:3]))
+                ee = erf(q_ref[:3], np.copy(q[:3]))
                 if npl.norm(ee[:2]) < traj_tolerance:
                     ii_last = ii_last + 1
+            elif path_type == "trajectory":
+                if t > t_delta:
+                    sample_space = [
+                        (q0[0], traj[goal_counter, 0]),
+                        (q0[1], traj[goal_counter, 1]),
+                        (-np.pi, np.pi),
+                        (0, saturation[0]),
+                        (-saturation[1] / 1.5, saturation[1] / 1.5),
+                        (-0.8, 0.8),
+                    ]
+                    planner.set_goal(traj[goal_counter, :])
+                    planner.update_plan(
+                        q, sample_space, goal_bias=goal_bias, finish_on_goal=True
+                    )
+                    t_delta += t_delta
+                err_now = np.abs(erf(traj[goal_counter, :], q))
+                if np.all(err_now <= real_tol):
+                    goal_counter += 1
+                q_ref = planner.get_state(t)
+                q_ref_dot = q_ref[3:]
 
+                # rrt_result = rrt.action(traj[goal_counter, :], q, is_same_goal, t)
+                # if not rrt_result:
+                #    is_same_goal = True
+                #    q_ref = rrt.get_ref(t)
+                #    q_ref_dot = q_ref[3:]
+                #    #print("goal: ", traj[goal_counter, :])
+                #    #print("goal number: ", goal_counter)
+
+                # else:
+                #    is_same_goal = False
+                #    goal_counter += 1
+                #    print("=" * 50)
+                #    #for tt in range(traj.shape[0]):  TODO: uncomment
+                #    if goal_counter == 1:
+                #        break
             v_dr, p_cmd, i_cmd, err_accumulation = pid_controller(
                 t, t_last, q[:2], q_ref[:2], q_dot, q_ref_dot, err_accumulation
             )
@@ -377,6 +440,9 @@ if __name__ == "__main__":
             dr_v_hist[i] = v_dr[:2]
             p_cmd_hist[i] = p_cmd
             i_cmd_hist[i] = i_cmd
+
+        if q_ref[0] == np.nan or q[0] == np.nan or v_dr[0] == np.nan:
+            print("q_ref: ", q_ref)
 
         # Step forward, qnext = qlast + qdot*dt
         q = dynamics.step(q, v_dr, dt)

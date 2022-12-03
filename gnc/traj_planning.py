@@ -26,7 +26,7 @@ else:
 nstates = 6
 ncontrols = 3
 
-real_tol = [0.5, 0.5, np.deg2rad(10), np.inf, np.inf, np.inf]
+real_tol = [2, 2, np.deg2rad(20), np.inf, np.inf, np.inf]
 pointshoot_tol = np.deg2rad(20)  # rad
 free_radius = 6  # m
 basic_duration = 1  # s
@@ -50,9 +50,9 @@ ss_start = 10  # m
 ss_step = 5  # m
 max_nodes = 1e5
 
-kp = np.repeat(0.2, 2)
-ki = np.repeat(0.01, 2)
-kd = np.repeat(0.0, 2)
+kp = np.array([0.2, 0.2, 0])
+ki = np.array([0.01, 0.01, 0.0])
+kd = np.array([0.0, 0.0, 0.0])
 # Vehicle dimensions
 boat_length = 1  # m
 boat_width = 0.5  # m
@@ -118,7 +118,7 @@ planner = lqrrt.Planner(
     error_tol=error_tol,
     erf=unset,
     min_time=basic_duration,
-    max_time=basic_duration,
+    max_time=3,
     max_nodes=max_nodes,
     sys_time=unset,
     printing=False,
@@ -192,12 +192,6 @@ class pdRRT_Node:
         self.next_seed = None
         self.move_count = 0
         self.initial_plan_time = basic_duration
-        self.velmax_pos = np.array(
-            [1.2, 0.6, 0.22]
-        )  # (m/s, m/s, rad/s), body-frame forward
-        self.velmax_neg = np.array(
-            [-0.6, -0.6, -0.22]
-        )  # (m/s, m/s, rad/s), body-frame backward
 
         # Issue control
         self.stuck = False
@@ -212,84 +206,44 @@ class pdRRT_Node:
         planner.unkill()
 
     # ACTION
-    def action(self, goal) -> Optional[bool]:
+    def action(self, goal, state, is_same_goal, t) -> Optional[bool]:
         """
         Returns:
             Optional[bool]: success
         """
+        # TODO: reference trajectory is going crazy
+
         # Start clean
         self.done = False
-        self.reset()
-        print("=" * 50)
+        self.reset() if not is_same_goal else None
 
-        # Give desired pose to everyone who needs it
         self.set_goal(goal)
+        self.state = state
 
         planner.dt = dt
-        velmax_pos = self.speed_factor * self.velmax_pos
-        velmax_neg = self.speed_factor * self.velmax_neg
 
-        # Find the heading that points to the goal
-        p_err = self.goal[:2] - self.state[:2]
-        h_goal = np.arctan2(p_err[1], p_err[0])
-
-        # If we aren't within a cone of that heading and the goal is far away, construct rotation
-        if (
-            abs(self.angle_diff(h_goal, self.state[2])) > pointshoot_tol
-            and npl.norm(p_err) > free_radius
-        ):
-            x_seq_rot, T_rot, rot_success, u_seq_rot = self.rotation_move(
-                self.state, h_goal, pointshoot_tol
-            )
-            print(f"\nRotating towards goal (duration: {np.round(T_rot, 2)})")
-            if not rot_success:
-                print("\n(cannot rotate completely!)")
-
-            # Begin interpolating rotation move
-            self.last_update_time = self.rostime()
-            if len(x_seq_rot):
-                self.get_ref = interp1d(
-                    np.arange(len(x_seq_rot)) * dt,
-                    np.array(x_seq_rot),
-                    axis=0,
-                    assume_sorted=True,
-                    bounds_error=False,
-                    fill_value=x_seq_rot[-1][:],
-                )
-                self.get_eff = interp1d(
-                    np.arange(len(u_seq_rot)) * dt,
-                    np.array(u_seq_rot),
-                    axis=0,
-                    assume_sorted=True,
-                    bounds_error=False,
-                    fill_value=u_seq_rot[-1][:],
-                )
-                self.next_runtime = np.clip(
-                    T_rot, basic_duration, 2 * np.pi / velmax_pos[2]
-                )
-                self.next_seed = np.copy(x_seq_rot[-1])
-            else:
-                self.next_runtime = basic_duration
-                self.next_seed = np.copy(self.state)
+        self.next_runtime = basic_duration
+        self.next_seed = np.copy(self.state)
 
         # (debug)
         if not self.lock_tree:
             assert self.next_seed is not None
             assert self.next_runtime is not None
 
-        # NEED LOOP
         # Begin tree-chaining loop
-        clean_update = self.tree_chain()
+        clean_update = self.tree_chain(t)
         self.move_count += 1
 
+        err_now = np.abs(self.erf(self.goal, self.state))
         # Print feedback
-        if clean_update and not (
-            self.preempted or self.unreachable or self.stuck or self.lock_tree
-        ):
-            print(f"\nMove {self.move_count}\n----")
-            print(f"Goal bias: {np.round(self.goal_bias, 2)}")
-            print(f"Tree size: {self.tree.size}")
-            print(f"Move duration: {np.round(self.next_runtime, 1)}")
+        # if clean_update and not (
+        #    self.preempted or self.unreachable or self.stuck or self.lock_tree
+        # ):
+        #    print(f"\nMove {self.move_count}\n----")
+        #    print(f"Goal bias: {np.round(self.goal_bias, 2)}")
+        #    print(f"Tree size: {self.tree.size}")
+        #    print(f"Move duration: {np.round(self.next_runtime, 1)}")
+        #    print(f"Error: {err_now}")
         # elif not self.lock_tree:
         #     print("\nIssue Status\n----")
         #     print("Stuck: {}".format(self.stuck))
@@ -299,13 +253,17 @@ class pdRRT_Node:
         #     print("Tree size: {}".format(self.tree.size))
         #     print("Move duration: {}".format(np.round(self.next_runtime, 1)))
 
-        if np.all(np.abs(self.erf(self.goal, self.state)) <= real_tol):
+        if np.all(err_now <= real_tol):
             remain = np.copy(self.goal)
             self.get_ref = lambda t: remain
             self.get_eff = lambda t: np.zeros(3)
             self.done = True
-        if self.done:
             print("\nDone!\n")
+            return True
+
+        if self.move_count > 400:
+            self.preempted = True
+            print("\nMove counter threshold reached\n")
             return True
 
         # Check for abrupt termination or unreachability
@@ -315,10 +273,12 @@ class pdRRT_Node:
             self.get_eff = lambda t: np.zeros(3)
             print("\nTerminated.\n")
             self.done = True
-            return False
+            return True
+
+        return False
 
     # WHERE IT HAPPENS
-    def tree_chain(self):
+    def tree_chain(self, t):
         """
         Plans an lqRRT and sets things up to chain along another lqRRT when
         called again.
@@ -338,9 +298,7 @@ class pdRRT_Node:
             and not self.stuck
         ):
             self.next_runtime = basic_duration
-            self.next_seed = self.get_ref(
-                self.next_runtime + time.time() - self.last_update_time
-            )
+            self.next_seed = self.get_ref(self.next_runtime + t - self.last_update_time)
         (
             self.goal_bias,
             self.sample_space,
@@ -393,7 +351,7 @@ class pdRRT_Node:
             self.x_seq = np.copy(planner.x_seq)
             self.u_seq = np.copy(planner.u_seq)
             self.tree = planner.tree
-            self.last_update_time = time.time()
+            self.last_update_time = t
             self.get_ref = planner.get_state
             self.get_eff = planner.get_effort
             self.next_runtime = planner.T
@@ -417,17 +375,11 @@ class pdRRT_Node:
         Chooses the goal bias, sample space, guide point, and pruning
         choice for the current move and behavior.
         """
-        b = 1
+        b = 0.5
         gs = np.copy(self.goal)
         ss = gen_ss(self.next_seed, self.goal)
 
-        if npl.norm(self.goal[:2] - self.next_seed[:2]) < free_radius:
-            return ([1, 1, 1, 0, 0, 0], ss, gs, False)
-        else:
-            if focus is None:
-                return ([b, b, 1, 0, 0, 1], ss, gs, True)
-            else:
-                return ([b, b, 0, 0, 0, 0], ss, gs, True)
+        return ([b, b, 0.3, 0, 0, 0.1], ss, gs, True)
 
     def reevaluate_plan(self) -> None:
         """
@@ -522,61 +474,6 @@ class pdRRT_Node:
         self.time_till_issue = None
 
     # LIL MATH DOERS
-    def rotation_move(self, x: List[float], h: float, tol: float):
-        """
-        Returns a state sequence, total time, success bool and effort
-        sequence for a simple rotate in place move. Success is False if
-        the move becomes infeasible before the state heading x[2] is within
-        the goal heading h+-tol. Give x (start state), and h (goal heading).
-
-        Args:
-            x (List[float]): The current state
-            h (float): The desired heading (similar to x[2])
-            tol (float): The tolerance of the heading
-
-        Returns:
-            Tuple[np.ndarray, float, bool, np.ndarray]: A tuple containing
-              the new state array, the amount of time the movement will take,
-              whether the operation is feasible, and the new effort array.
-        """
-        # Set-up
-        x = np.array(x, dtype=np.float64)
-        xg = np.copy(x)
-        xg[2] = h
-        x_seq = []
-        u_seq = []
-        T = 0
-        i = 0
-        u = np.zeros(3)
-
-        # NEED LOOP
-        # Simulate rotation move
-        # Stop if pose is infeasible
-        if not is_feasible(np.concatenate((x[:3], np.zeros(3))), np.zeros(3)) and len(
-            x_seq
-        ):
-            portion = FPR * len(x_seq)
-            return (
-                x_seq[: int(portion)],
-                T - portion * dt,
-                False,
-                u_seq[: int(portion)],
-            )
-        else:
-            x_seq.append(x)
-            u_seq.append(u)
-
-        # Keep rotating towards goal until tolerance is met
-        e = self.erf(xg, x)
-        if abs(e[2]) <= tol:
-            return (x_seq, T, True, u_seq)
-
-        # Step
-        u = 3 * lqr(x, u)[1].dot(e)
-        x = TetheredDynamics(x, u, dt)
-        T += dt
-        i += 1
-
     def erf(self, goal_state: List[float], state: List[float]) -> np.ndarray:
         """
         Returns error given two states goal_state and state.
@@ -643,12 +540,26 @@ def main():
     planning = pp(sp1, sp2, dy, is_plot)
     traj = planning.trajectory(max_vel=2)
 
-    print(traj.shape)
+    st = np.array([5, 5, np.deg2rad(45), 0, 0, 0])
 
     rrt = pdRRT_Node()
+    is_same_goal = False
 
-    for tt in range(traj.shape[0]):
-        rrt.action(traj[tt, :])
+    # for tt in range(traj.shape[0]):
+    for tt in range(1):
+        is_same_goal = False
+        print("=" * 50)
+        while not rrt.action(
+            goal=traj[tt, :], state=st, is_same_goal=is_same_goal, t=tt
+        ):
+            is_same_goal = True
+            # Best controller you will ever see
+            st = st + (traj[tt, :] - st) * 0.2
+            print("state: ", st)
+            print("goal: ", traj[tt, :])
+            print("goal number: ", tt)
+
+    print("FINISHED WITH ALL THE TREE!")
 
     return 0
 
