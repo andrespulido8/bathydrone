@@ -7,14 +7,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from lqRRT import lqrrt
+from open_loop_dynamics import OpenLoopDynamics
 from path_planning import pp
 from tethered_dynamics import TetheredDynamics
-from traj_planning import pdRRT_Node
 
 npl = np.linalg
 
 IS_OPEN_LOOP = False
-path_type = "trajectory"  # 'lawnmower', 'line', 'obstacle', 'trajectory' or 'data'
+# TODO: fix open loop with line
+path_type = "obstacle"  # 'lawnmower', 'line', 'obstacle', 'trajectory' or 'data'
 # data can be open or closed loop
 
 # Controller parameters
@@ -29,7 +30,7 @@ traj_tolerance = 15.0
 err_reset_dist = 50
 is_debug = False
 
-if path_type == "data":
+if path_type == "data" or path_type == "line":
     # Trajectory
     echo_3_051722 = pd.read_csv("./traj_data/force_traj_3.csv")
     echo_6_051722 = pd.read_csv("./traj_data/force_traj_6.csv")
@@ -48,33 +49,36 @@ elif path_type == "lawnmower" or path_type == "trajectory":
     is_plot = False
     planning = pp(sp1, sp2, dy, is_plot)
     traj = planning.trajectory(max_vel=saturation[0])
+    traj = traj[: traj.shape[0] // 2, :]  # short data
 
 tension_magnitudes = [9, 11, 18, 27.5]
 
 ## Trajectory Planning
-nstates = 6
-ncontrols = 2
+nstates = 9
+ncontrols = 3
 # Vehicle dimensions
 boat_length = 1  # m
 boat_width = 0.5  # m
-goal_buffer = [2, 2, np.inf, np.inf, np.inf, np.inf]
+goal_buffer = [2, 2, np.inf, np.inf, np.inf, np.inf, np.inf, np.inf, np.inf]
 error_tol = np.copy(goal_buffer) / 2
 if path_type == "obstacle":
     obs = np.array(
         [
-            [3, 2, 2],
+            [3, -2, 2],
         ]
     )
-    goal = [10, 10, np.deg2rad(90), 0, 0, 0]
+    # Goals for the drone position ignored
+    goal = [10, 10, np.deg2rad(90), 0, 0, 0, 0, 0, 0]
 elif path_type == "trajectory":
     obs = []
-goal_bias = [0.3, 0.3, 0, 0, 0, 0]
+goal_bias = [0.3, 0.3, 0, 0, 0, 0, 0, 0, 0]
 
 
 def gen_ss(seed, goal, buff=[1] * 4):
     """
     Returns a sample space given a seed state, goal state, and buffer.
-
+    The drone position is not sampled because it is determined by the
+    control input.
     """
     return [
         (min([seed[0], goal[0]]) - buff[0], max([seed[0], goal[0]]) + buff[1]),
@@ -83,6 +87,9 @@ def gen_ss(seed, goal, buff=[1] * 4):
         (-0.0, 2),
         (-0.2, 0.2),
         (-0.8, 0.8),
+        (seed[6], seed[6]),
+        (seed[7], seed[7]),
+        (seed[8], seed[8]),
     ]
 
 
@@ -111,8 +118,8 @@ def lqr(x, u):
     global kp, kd
     kp_mat = np.diag(kp)
     kd_mat = np.diag(kd)
-    S = np.diag([1, 1, 0.1, 0.1, 0.1, 0.1])
-    K = np.hstack((kp_mat, kd_mat))
+    S = np.diag([1, 1, 0.1, 0.0, 0.0, 0.1, 0, 0, 0])
+    K = np.hstack((kp_mat, kd_mat, np.zeros((3, 3))))
     return (S, K)
 
 
@@ -127,7 +134,7 @@ def get_boat_position(t, ii):
     """
     if path_type == "line" and not IS_OPEN_LOOP:
         raise ValueError('Path type "line" is only for open loop simulations')
-    elif path_type == "data":
+    else:
         t_i = df_dr["time"].iloc[ii]
         while t_i <= t:
             t_i = df_dr["time"].iloc[ii]
@@ -222,7 +229,7 @@ def get_R(q):
 if __name__ == "__main__":
 
     data_file_index = 1
-    if path_type == "data":
+    if path_type == "data" or path_type == "line":
         # Choose one option from the datasets (drones and echos)
         df_dr = drones[data_file_index]
         df_bt = echos[data_file_index]
@@ -234,20 +241,16 @@ if __name__ == "__main__":
         df_dr["time"] = df_dr["time"] - df_dr["time"].to_numpy()[76]
         df_dr = df_dr.drop(df_dr.index[range(0, 76)])
 
-    ten_mag = tension_magnitudes[
-        data_file_index
-    ]  # choose magnitude depending on the drones dataset
+    # choose magnitude depending on the drones dataset
+    ten_mag = tension_magnitudes[data_file_index]
     i_last = 0
     ii_last = 0
     t_last = 0
 
-    # Matplotlib Animation Parameters
-    framerate = 20  # fps
-    speedup = 100  # kinda makes the playback a little faster
-    store_data = False  # should data be stored into a .mat?
-    outline_path = True  # show path outline on animation?
-
-    dynamics = TetheredDynamics(ten_mag=ten_mag)
+    if IS_OPEN_LOOP:
+        dynamics = OpenLoopDynamics(ten_mag=ten_mag)
+    else:
+        dynamics = TetheredDynamics(ten_mag=ten_mag)
     # Initial condition
     # State: [m, m, rad, m/s, m/s, rad/s]
     x0 = -5
@@ -257,7 +260,7 @@ if __name__ == "__main__":
         or path_type == "obstacle"
         or path_type == "trajectory"
     ):
-        y0 = 5 if path_type == "obstacle" else 30
+        y0 = 0 if path_type == "obstacle" else 30
         dr0 = np.array([2, y0, 0], dtype=np.float64)  # [m, m, rad]
         q0 = np.array(
             [
@@ -271,6 +274,7 @@ if __name__ == "__main__":
             dtype=np.float64,
         )
         goal_counter = 0
+        index_counter = 0
         is_same_goal = False
     elif path_type == "data":
         jj = np.argmax(df_dr["time"].to_numpy() >= 0)
@@ -281,9 +285,9 @@ if __name__ == "__main__":
             [df_bt["X_m"].iloc[jj], df_bt["Y_m"].iloc[jj], 0, 0, 0, 0], dtype=np.float64
         )
         dr0, _ = get_drone_position(t_last, dynamics.hd, i_last)
-    dynamics.dr = np.copy(dr0)
-    # TODO: There might be a problem with the internal dr to the dynamics
+    dr = np.copy(dr0)
     q = np.copy(q0)
+    x = np.concatenate((q0, dr0))
 
     if path_type == "obstacle" or path_type == "trajectory":
         constraints = lqrrt.Constraints(
@@ -295,9 +299,9 @@ if __name__ == "__main__":
         if path_type == "obstacle":
             goal0 = goal
         else:
-            goal0 = traj[0, :]
-            # rrt = pdRRT_Node()
-        sample_space = gen_ss(q0, goal0, [1, 1, 0, 0, 0, 0])
+            goal0 = None
+            T_last = 0
+
         planner = lqrrt.Planner(
             dynamics.step,
             lqr,
@@ -313,11 +317,51 @@ if __name__ == "__main__":
             goal0=goal0,
         )
         t_delta = 5
-        real_tol = [2, 2, np.deg2rad(20), np.inf, np.inf, np.inf]
+        real_tol = [
+            2,
+            2,
+            np.deg2rad(20),
+            np.inf,
+            np.inf,
+            np.inf,
+            np.inf,
+            np.inf,
+            np.inf,
+        ]
 
-        planner.update_plan(q0, sample_space, goal_bias=goal_bias, finish_on_goal=True)
+        if path_type == "obstacle":
+            sample_space = gen_ss(x, goal0, [1, 1, 1, 1])
+            planner.update_plan(
+                np.copy(x), sample_space, goal_bias=goal_bias, finish_on_goal=True
+            )
+        else:
+            s0 = np.copy(x)
+            get_state_history = []
+            u_ref_history = []
+            Ts = np.zeros(traj.shape[0])
+            for i in range(traj.shape[0]):
+                # go to new waypoint, generate and plan the path
+                planner.set_goal(traj[i, :])
+                sample_space = gen_ss(s0, traj[i, :], [1, 1, 1, 1])
+                planner.update_plan(
+                    s0, sample_space, goal_bias=goal_bias, finish_on_goal=True
+                )
+                # get the results  and save them to later use them in order
+                Ts[i] = planner.T
+                states = np.zeros((int(planner.T / 0.01) + 1, 9))
+                efforts = np.zeros((int(planner.T / 0.01) + 1, 3))
+                for ii, t in enumerate(np.arange(0, planner.T, 0.01)):
+                    states[ii] = planner.get_state(t)
+                    efforts[ii] = planner.get_effort(t)
+                get_state_history.append(states)
+                u_ref_history.append(efforts)
+                # next initial state
+                s0 = planner.get_state(planner.T)
+                print("Goal: ", traj[i, :])
+                print("Goal number: ", i)
 
-    dynamics.dr = np.copy(dr0)
+    print("=" * 50)
+    print("Starting simulation")
     print(f"dr0: {dr0}")
     print(f"q0: {q0}")
     # Simulation duration, timestep and animation parameters
@@ -325,7 +369,7 @@ if __name__ == "__main__":
     if path_type == "line":
         T = 150  # s
         dt = 0.001
-    elif path_type == "lawnmower" or path_type == "trajectory":
+    elif path_type == "lawnmower":
         dist_between_pts = 7
         T = (
             traj.shape[0] * dist_between_pts / 2
@@ -335,18 +379,22 @@ if __name__ == "__main__":
         T = np.min([df_bt["time1"].to_numpy()[-1], df_dr["time"].to_numpy()[-1]])
         dt = 0.01
     elif path_type == "obstacle":
-        T = planner.T + 5
+        T = planner.T
         dt = 0.01
+    elif path_type == "trajectory":
+        dt = 0.01
+        T = Ts.sum()
+    print("T: ", T)
 
     # Define time domain
     t_arr = np.arange(t0, T, dt)
 
     # Preallocate results memory
-    q_history = np.zeros((len(t_arr), len(q)))
-    bt_history = np.zeros((len(t_arr), len(q)))
-    dr_history = np.zeros((len(t_arr), int(len(q) / 2)))
-    u_history = np.zeros((len(t_arr), int(len(q) / 2)))
-    u_world_history = np.zeros((len(t_arr), int(len(q) / 2)))
+    q_history = np.zeros((len(t_arr), 6))
+    bt_history = np.zeros((len(t_arr), 6))
+    dr_history = np.zeros((len(t_arr), 3))
+    u_history = np.zeros((len(t_arr), 3))
+    u_world_history = np.zeros((len(t_arr), 3))
     head_dr = np.zeros(len(t_arr))
     dr_v_hist = np.zeros((len(t_arr), ncontrols))
     p_cmd_hist = np.zeros((len(t_arr), ncontrols))
@@ -355,13 +403,13 @@ if __name__ == "__main__":
     # Integrate dynamics using first-order forward stepping
     for i, t in enumerate(t_arr):
 
-        q_dot = q[3:]
+        q_dot = q[3:6]
         if IS_OPEN_LOOP:
-            if npl.norm(q[:2] - dynamics.dr[:2]) <= dynamics.proj_le + dynamics.dL:
+            if npl.norm(q[:2] - dr[:2]) <= dynamics.proj_le + dynamics.dL:
                 dynamics.dr, i_last = get_drone_position(t_last, dynamics.hd, i_last)
                 t_last += dt
             q_ref, ii_last = get_boat_position(t, ii_last)
-            v_dr = None
+            v_dr = np.array([0, 0, 0])
         else:
             if path_type == "data":
                 # q_ref is boat position from the data
@@ -371,68 +419,54 @@ if __name__ == "__main__":
                 # Planner's decision
                 u_ref = planner.get_effort(t)
                 q_ref = planner.get_state(t)
-                q_ref_dot = q_ref[3:]
-
-                # Controller's decision
-                # kk = lqr(q, u_ref)[1]
-                # ee = erf(q_ref, np.copy(q))
-                # v_dr = kk.dot(ee)
-                # print("lqr: ", lqr(q, uref)[1])
-                # print("erf: ", erf(q_ref, np.copy(q)))
-                # print("v_dr: ", v_dr)
+                q_ref_dot = q_ref[3:6]
             elif path_type == "lawnmower":
                 if traj.shape[0] == ii_last:
                     print("End of data. Time=", t)
                     break
                 q_ref = traj[ii_last]
-                q_ref_dot = traj[ii_last][3:]
+                q_ref_dot = traj[ii_last][3:6]
                 ee = erf(q_ref[:3], np.copy(q[:3]))
                 if npl.norm(ee[:2]) < traj_tolerance:
                     ii_last = ii_last + 1
             elif path_type == "trajectory":
-                if t > t_delta:
-                    sample_space = [
-                        (q0[0], traj[goal_counter, 0]),
-                        (q0[1], traj[goal_counter, 1]),
-                        (-np.pi, np.pi),
-                        (0, saturation[0]),
-                        (-saturation[1] / 1.5, saturation[1] / 1.5),
-                        (-0.8, 0.8),
-                    ]
-                    planner.set_goal(traj[goal_counter, :])
-                    planner.update_plan(
-                        q, sample_space, goal_bias=goal_bias, finish_on_goal=True
-                    )
-                    t_delta += t_delta
-                err_now = np.abs(erf(traj[goal_counter, :], q))
-                if np.all(err_now <= real_tol):
-                    goal_counter += 1
-                q_ref = planner.get_state(t)
-                q_ref_dot = q_ref[3:]
-
-                # rrt_result = rrt.action(traj[goal_counter, :], q, is_same_goal, t)
-                # if not rrt_result:
-                #    is_same_goal = True
-                #    q_ref = rrt.get_ref(t)
-                #    q_ref_dot = q_ref[3:]
-                #    #print("goal: ", traj[goal_counter, :])
-                #    #print("goal number: ", goal_counter)
-
-                # else:
-                #    is_same_goal = False
+                # TIME ATTEMPT
+                # if t > t_delta:
+                #    planner.set_goal(traj[goal_counter, :])
+                #    planner.update_plan(
+                #        q, sample_space, goal_bias=goal_bias, finish_on_goal=True
+                #    )
+                #    t_delta += t_delta
+                # err_now = np.abs(erf(traj[goal_counter, :], q))
+                # if np.all(err_now <= real_tol):
                 #    goal_counter += 1
-                #    print("=" * 50)
-                #    #for tt in range(traj.shape[0]):  TODO: uncomment
-                #    if goal_counter == 1:
-                #        break
+                # q_ref = planner.get_state(t)
+                # q_ref_dot = q_ref[3:]
+
+                if t >= T_last + Ts[goal_counter]:
+                    T_last += Ts[goal_counter]
+                    goal_counter += 1
+                    index_counter = 0
+                    if goal_counter >= traj.shape[0]:
+                        print("End of data. Time=", t)
+                        break
+
+                u_ref = u_ref_history[goal_counter][index_counter]
+                q_ref = get_state_history[goal_counter][index_counter]
+                # u_ref = u_ref_history[goal_counter].get_effort(t - T_last)
+                # q_ref = plan_history[goal_counter].get_state(t - T_last)
+                q_ref_dot = q_ref[3:6]
+                index_counter += 1
+
             v_dr, p_cmd, i_cmd, err_accumulation = pid_controller(
                 t, t_last, q[:2], q_ref[:2], q_dot, q_ref_dot, err_accumulation
             )
+            v_dr = np.copy(u_ref) if path_type == "obstacle" else v_dr
             t_last += dt
 
-        bt_history[i] = q_ref
+        bt_history[i] = q_ref[:6]
         q_history[i] = q
-        dr_history[i] = dynamics.dr
+        dr_history[i] = dr
         u_history[i] = dynamics.u
         u_world_history[i] = dynamics.ten
         head_dr[i] = np.degrees(np.arctan2(dynamics.diff_pos[1], dynamics.diff_pos[0]))
@@ -441,11 +475,11 @@ if __name__ == "__main__":
             p_cmd_hist[i] = p_cmd
             i_cmd_hist[i] = i_cmd
 
-        if q_ref[0] == np.nan or q[0] == np.nan or v_dr[0] == np.nan:
-            print("q_ref: ", q_ref)
-
         # Step forward, qnext = qlast + qdot*dt
-        q = dynamics.step(q, v_dr, dt)
+        x = np.concatenate((q, dr))
+        x = dynamics.step(x, v_dr, dt)
+        q = x[:6]
+        dr = x[6:]
 
     ## PLOTS
     print("\nPlotting...")
@@ -648,7 +682,7 @@ if __name__ == "__main__":
             s=48,
             label="sequence",
         )
-        ax1.scatter(goal[dx], goal[dy], color="g", s=48, label="Goal")
+        ax1.scatter(planner.goal[dx], planner.goal[dy], color="g", s=48, label="Goal")
         ax1.legend()
         for ob in obs:
             ax1.add_patch(
@@ -696,6 +730,12 @@ if __name__ == "__main__":
     pact = ax6.scatter(
         bt_history[0, 0], bt_history[0, 1], color="c", s=pthick, label="boat data"
     )
+
+    # Matplotlib Animation Parameters
+    framerate = 20  # fps
+    speedup = 100  # kinda makes the playback a little faster
+    store_data = False  # should data be stored into a .mat?
+    outline_path = True  # show path outline on animation?
 
     # Plot entirety of actual obstacle
     if outline_path:

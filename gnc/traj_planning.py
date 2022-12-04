@@ -1,7 +1,29 @@
 #!/usr/bin/env python3
+""" Made to chain the rrt planning for many goals but it is not
+    working yet. I might try to use this file later again
+    when I try to do online planning
 
+    In boat.py I tried:
+
+    from traj_planning import pdRRT_Node
+
+    # rrt = pdRRT_Node()
+    # TRAJ PLANNER IN THE SIM LOOP
+    # rrt_result = rrt.action(traj[goal_counter, :], q, is_same_goal, t)
+    # if not rrt_result:
+    #    is_same_goal = True
+    #    q_ref = rrt.get_ref(t)
+    #    q_ref_dot = q_ref[3:]
+
+    # else:
+    #    is_same_goal = False
+    #    goal_counter += 1
+    #    print("=" * 50)
+    #    #for tt in range(traj.shape[0]):  TODO: uncomment
+    #    if goal_counter == 1:
+    #        break
+"""
 import time
-from types import ModuleType
 from typing import List, Optional
 
 import lqrrt
@@ -164,7 +186,7 @@ class pdRRT_Node:
 
         # Set-up planners
         planner.set_system(erf=self.erf)
-        planner.set_runtime(sys_time=time.time)
+        planner.set_runtime()
         planner.constraints.set_feasibility_function(is_feasible)
 
         # Initialize resettable stuff
@@ -236,14 +258,14 @@ class pdRRT_Node:
 
         err_now = np.abs(self.erf(self.goal, self.state))
         # Print feedback
-        # if clean_update and not (
-        #    self.preempted or self.unreachable or self.stuck or self.lock_tree
-        # ):
-        #    print(f"\nMove {self.move_count}\n----")
-        #    print(f"Goal bias: {np.round(self.goal_bias, 2)}")
-        #    print(f"Tree size: {self.tree.size}")
-        #    print(f"Move duration: {np.round(self.next_runtime, 1)}")
-        #    print(f"Error: {err_now}")
+        if clean_update and not (
+            self.preempted or self.unreachable or self.stuck or self.lock_tree
+        ):
+            print(f"\nMove {self.move_count}\n----")
+            print(f"Goal bias: {np.round(self.goal_bias, 2)}")
+            print(f"Tree size: {self.tree.size}")
+            print(f"Move duration: {np.round(self.next_runtime, 1)}")
+            print(f"Error: {err_now}")
         # elif not self.lock_tree:
         #     print("\nIssue Status\n----")
         #     print("Stuck: {}".format(self.stuck))
@@ -515,21 +537,6 @@ class pdRRT_Node:
         # Create and establish goal
         self.goal = np.copy(x)
         planner.set_goal(self.goal)
-
-    def publish_ref(self, *args) -> None:
-        """
-        Publishes the reference trajectory as an Odometry message to the ref
-        publisher. Also publishes the reference effort as a WrenchStamped
-        message to the effort publisher.
-        """
-        # Make sure a plan exists
-        last_update_time = self.last_update_time
-        if self.get_ref is None or last_update_time is None:
-            return
-
-        # Time since last update
-        time_since = self.rostime() - last_update_time
-        stamp = time.time()
 
 
 def main():

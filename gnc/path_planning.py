@@ -174,7 +174,19 @@ class pp:
         X, Y = self.path()
         h = self.heading()
         d = self.velocity()
-        return np.array([X, Y, h, d[:, 0], d[:, 1], np.repeat(0, len(X))]).T
+        return np.array(
+            [
+                X,
+                Y,
+                h,
+                d[:, 0],
+                d[:, 1],
+                np.repeat(0, len(X)),
+                np.repeat(0, len(X)),
+                np.repeat(0, len(X)),
+                np.repeat(0, len(X)),
+            ]
+        ).T
 
     def plot(self):
         """Plots the path"""
