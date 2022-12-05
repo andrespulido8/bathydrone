@@ -13,7 +13,7 @@ from tethered_dynamics import TetheredDynamics
 
 npl = np.linalg
 
-IS_OPEN_LOOP = True
+IS_OPEN_LOOP = False
 
 # TODO: fix open loop with line
 path_type = "data"  # 'lawnmower', 'line', 'obstacle', 'trajectory' or 'data'
@@ -485,22 +485,33 @@ if __name__ == "__main__":
     ## PLOTS
     print("\nPlotting...")
 
+    plt.style.use("default")
+    plt.rcParams.update(
+        {
+            "text.usetex": True,
+            "font.family": "sans-serif",
+            "font.sans-serif": ["Helvetica"],
+        }
+    )
+    plt.rcParams.update({"font.size": 18})
+
     # Figure for individual results
     fig1 = plt.figure()
     fig1.suptitle("State Evolution", fontsize=20)
-    fig1rows = 2
-    fig1cols = 5
+    fig1rows = 1
+    fig1cols = 2
 
     # Plot x position
     ax = fig1.add_subplot(fig1rows, fig1cols, 1)
     ax.set_title("X Position (m)", fontsize=16)
-    ax.plot(t_arr, q_history[:, 0], "-g", label="sim boat")
-    ax.plot(t_arr, dr_history[:, 0], "--b", label="drone")
+    ax.plot(t_arr, q_history[:, 0], "-g", label="Simulated boat")
+    ax.plot(t_arr, dr_history[:, 0], "--b", label="Drone")
     if not IS_OPEN_LOOP:
-        ax.plot(t_arr, bt_history[:, 0], "-.r", label="boat reference boat(data)")
-        ax.plot(t_arr, bt_history[:, 0] - traj_tolerance, "--r")
-        ax.plot(t_arr, bt_history[:, 0] + traj_tolerance, "--r")
+        ax.plot(t_arr, bt_history[:, 0], "-.r", label="Boat reference boat (data)")
+        # ax.plot(t_arr, bt_history[:, 0] - traj_tolerance, "--r")
+        # ax.plot(t_arr, bt_history[:, 0] + traj_tolerance, "--r")
     ax.grid(True)
+    ax.set_xlabel("Time (s)")
     ax.legend()
     # Plot y position
     ax = fig1.add_subplot(fig1rows, fig1cols, 2)
@@ -508,115 +519,117 @@ if __name__ == "__main__":
     ax.plot(t_arr, q_history[:, 1], "-g", t_arr, dr_history[:, 1], "--b")
     if not IS_OPEN_LOOP:
         ax.plot(t_arr, bt_history[:, 1], "-.r")
-        ax.plot(t_arr, bt_history[:, 1] - traj_tolerance, "--r")
-        ax.plot(t_arr, bt_history[:, 1] + traj_tolerance, "--r")
+        # ax.plot(t_arr, bt_history[:, 1] - traj_tolerance, "--r")
+        # ax.plot(t_arr, bt_history[:, 1] + traj_tolerance, "--r")
     ax.grid(True)
 
     # Plot orientation
-    ax = fig1.add_subplot(fig1rows, fig1cols, 3)
-    ax.set_title(
-        "Heading (deg)",
-        fontsize=16,
-    )
-    ax.plot(t_arr, np.rad2deg(q_history[:, 2]), "g", label="sim boat heading")
-    ax.plot(t_arr, head_dr, "k", label="heading from boat to drone")
-    ax.grid(True)
-    ax.legend()
+    # ax = fig1.add_subplot(fig1rows, fig1cols, 3)
+    # ax.set_title(
+    #    "Heading (deg)",
+    #    fontsize=16,
+    # )
+    # ax.plot(t_arr, np.rad2deg(q_history[:, 2]), "g", label="sim boat heading")
+    # ax.plot(t_arr, head_dr, "k", label="heading from boat to drone")
+    # ax.grid(True)
+    # ax.legend()
 
-    # Plot control efforts
-    ax = fig1.add_subplot(fig1rows, fig1cols, 4)
-    ax.set_title("Body-fixed Wrench (N, N, N*m)", fontsize=16)
-    ax.plot(t_arr, u_history[:, 0], "b", label="x [N]")
-    ax.plot(t_arr, u_history[:, 1], "g", label="y [N]")
-    ax.plot(t_arr, u_history[:, 2], "r", label="z [N m]")
-    ax.legend()
-    ax.grid(True)
+    ## Plot control efforts
+    # ax = fig1.add_subplot(fig1rows, fig1cols, 4)
+    # ax.set_title("Body-fixed Wrench (N, N, N*m)", fontsize=16)
+    # ax.plot(t_arr, u_history[:, 0], "b", label="x [N]")
+    # ax.plot(t_arr, u_history[:, 1], "g", label="y [N]")
+    # ax.plot(t_arr, u_history[:, 2], "r", label="z [N m]")
+    # ax.legend()
+    # ax.grid(True)
 
-    # Plot x velocity
-    ax = fig1.add_subplot(fig1rows, fig1cols, 6)
-    ax.set_title("Surge (m/s)", fontsize=16)
-    ax.plot(
-        t_arr,
-        q_history[:, 3],
-        "g",
-    )
+    ## Plot x velocity
+    # ax = fig1.add_subplot(fig1rows, fig1cols, 6)
+    # ax.set_title("Surge (m/s)", fontsize=16)
+    # ax.plot(
+    #    t_arr,
+    #    q_history[:, 3],
+    #    "g",
+    # )
+    # ax.set_xlabel("Time (s)")
+    # ax.grid(True)
+
+    ## Plot y velocity
+    # ax = fig1.add_subplot(fig1rows, fig1cols, 7)
+    # ax.set_title("Sway (m/s)", fontsize=16)
+    # ax.plot(
+    #    t_arr,
+    #    q_history[:, 4],
+    #    "g",
+    # )
+    # ax.set_xlabel("Time (s)")
+    # ax.grid(True)
+
+    ## Plot yaw velocity
+    # ax = fig1.add_subplot(fig1rows, fig1cols, 8)
+    # ax.set_title("Yaw (deg/s)", fontsize=16)
+    # ax.plot(
+    #    t_arr,
+    #    np.rad2deg(q_history[:, 5]),
+    #    "g",
+    # )
+    # ax.set_xlabel("Time (s)")
+    # ax.grid(True)
+
+    ## Wrench in world frame
+    # ax = fig1.add_subplot(fig1rows, fig1cols, 5)
+    # ax.set_title("World Wrench [N, N, Nm]", fontsize=16)
+    # ax.plot(t_arr, u_world_history[:, 0], "b", label="x [N]")
+    # ax.plot(t_arr, u_world_history[:, 1], "g", label="y [N]")
+    # ax.plot(t_arr, u_world_history[:, 2], "r", label="z [N m]")
+    # ax.set_xlabel("Time (s)")
+    # ax.legend()
+    # ax.grid(True)
+
+    ## Dist drone and boat
+    # ax = fig1.add_subplot(fig1rows, fig1cols, 9)
+    # ax.set_title("Distance drone and boat (m)", fontsize=16)
+    # ax.plot(t_arr, dr_history[:, 0] - q_history[:, 0], "b", label="x [m]")
+    # ax.plot(t_arr, dr_history[:, 1] - q_history[:, 1], "g", label="y [m]")
+    # ax.set_xlabel("Time (s)")
+    # ax.legend()
+    # ax.grid(True)
+
+    ## Dist norm drone and boat
+    # ax = fig1.add_subplot(fig1rows, fig1cols, 10)
+    # ax.set_title("Norm of Distance (m)", fontsize=16)
+    # ax.plot(
+    #    t_arr,
+    #    np.sqrt(
+    #        (q_history[:, 0] - dr_history[:, 0]) ** 2
+    #        + (q_history[:, 1] - dr_history[:, 1]) ** 2
+    #    ),
+    #    "k",
+    # )
+    # ax.plot(
+    #    [t_arr[0], t_arr[-1]],
+    #    [dynamics.proj_le, dynamics.proj_le],
+    #    "-r",
+    #    label="rope length",
+    # )
+    # ax.plot(
+    #    [t_arr[0], t_arr[-1]],
+    #    [dynamics.proj_le - dynamics.dL, dynamics.proj_le - dynamics.dL],
+    #    "--g",
+    #    label="force threshold",
+    # )
+    # ax.plot(
+    #    [t_arr[0], t_arr[-1]],
+    #    [dynamics.proj_le + dynamics.dL, dynamics.proj_le + dynamics.dL],
+    #    "-g",
+    #    label="no v_dr threshold",
+    # )
     ax.set_xlabel("Time (s)")
-    ax.grid(True)
-
-    # Plot y velocity
-    ax = fig1.add_subplot(fig1rows, fig1cols, 7)
-    ax.set_title("Sway (m/s)", fontsize=16)
-    ax.plot(
-        t_arr,
-        q_history[:, 4],
-        "g",
-    )
-    ax.set_xlabel("Time (s)")
-    ax.grid(True)
-
-    # Plot yaw velocity
-    ax = fig1.add_subplot(fig1rows, fig1cols, 8)
-    ax.set_title("Yaw (deg/s)", fontsize=16)
-    ax.plot(
-        t_arr,
-        np.rad2deg(q_history[:, 5]),
-        "g",
-    )
-    ax.set_xlabel("Time (s)")
-    ax.grid(True)
-
-    # Wrench in world frame
-    ax = fig1.add_subplot(fig1rows, fig1cols, 5)
-    ax.set_title("World Wrench [N, N, Nm]", fontsize=16)
-    ax.plot(t_arr, u_world_history[:, 0], "b", label="x [N]")
-    ax.plot(t_arr, u_world_history[:, 1], "g", label="y [N]")
-    ax.plot(t_arr, u_world_history[:, 2], "r", label="z [N m]")
-    ax.set_xlabel("Time (s)")
-    ax.legend()
-    ax.grid(True)
-
-    # Dist drone and boat
-    ax = fig1.add_subplot(fig1rows, fig1cols, 9)
-    ax.set_title("Distance drone and boat (m)", fontsize=16)
-    ax.plot(t_arr, dr_history[:, 0] - q_history[:, 0], "b", label="x [m]")
-    ax.plot(t_arr, dr_history[:, 1] - q_history[:, 1], "g", label="y [m]")
-    ax.set_xlabel("Time (s)")
-    ax.legend()
-    ax.grid(True)
-
-    # Dist norm drone and boat
-    ax = fig1.add_subplot(fig1rows, fig1cols, 10)
-    ax.set_title("Norm of Distance (m)", fontsize=16)
-    ax.plot(
-        t_arr,
-        np.sqrt(
-            (q_history[:, 0] - dr_history[:, 0]) ** 2
-            + (q_history[:, 1] - dr_history[:, 1]) ** 2
-        ),
-        "k",
-    )
-    ax.plot(
-        [t_arr[0], t_arr[-1]],
-        [dynamics.proj_le, dynamics.proj_le],
-        "-r",
-        label="rope length",
-    )
-    ax.plot(
-        [t_arr[0], t_arr[-1]],
-        [dynamics.proj_le - dynamics.dL, dynamics.proj_le - dynamics.dL],
-        "--g",
-        label="force threshold",
-    )
-    ax.plot(
-        [t_arr[0], t_arr[-1]],
-        [dynamics.proj_le + dynamics.dL, dynamics.proj_le + dynamics.dL],
-        "-g",
-        label="no v_dr threshold",
-    )
-    ax.set_xlabel("Time (s)")
-    ax.legend()
+    # ax.legend()
     ax.grid(True)
     plt.show()
+
+    # Second figure
     if not IS_OPEN_LOOP:
         print(
             "Mean Square Error X: ", np.mean((q_history[:, 0] - bt_history[:, 0]) ** 2)
@@ -627,33 +640,35 @@ if __name__ == "__main__":
         fig2 = plt.figure()
         fig2.suptitle("Error Evolution", fontsize=20)
         fig1rows = 1
-        fig1cols = 5
+        fig1cols = 2
         ax1 = fig2.add_subplot(fig1rows, fig1cols, 1)
         ax1.set_title("X Error (m)", fontsize=16)
         ax1.plot(t_arr, bt_history[:, 0] - q_history[:, 0], "k")
+        ax1.set_xlabel("Time (s)")
         ax1.grid(True)
         ax1 = fig2.add_subplot(fig1rows, fig1cols, 2)
         ax1.set_title("Y Error (m)", fontsize=16)
         ax1.plot(t_arr, bt_history[:, 1] - q_history[:, 1], "b")
+        ax1.set_xlabel("Time (s)")
         ax1.grid(True)
-        ax1 = fig2.add_subplot(fig1rows, fig1cols, 3)
-        ax1.set_title("Drone vel (m/s)", fontsize=16)
-        ax1.plot(t_arr, dr_v_hist[:, 0], "k", label="vx")
-        ax1.plot(t_arr, dr_v_hist[:, 1], "b", label="vy")
-        ax1.grid(True)
-        ax1.legend()
-        ax1 = fig2.add_subplot(fig1rows, fig1cols, 4)
-        ax1.set_title("P command (m/s)", fontsize=16)
-        ax1.plot(t_arr, p_cmd_hist[:, 0], "k", label="x")
-        ax1.plot(t_arr, p_cmd_hist[:, 1], "b", label="y")
-        ax1.grid(True)
-        ax1.legend()
-        ax1 = fig2.add_subplot(fig1rows, fig1cols, 5)
-        ax1.set_title("I command (m/s)", fontsize=16)
-        ax1.plot(t_arr, i_cmd_hist[:, 0], "k", label="x")
-        ax1.plot(t_arr, i_cmd_hist[:, 1], "b", label="y")
-        ax1.grid(True)
-        ax1.legend()
+        # ax1 = fig2.add_subplot(fig1rows, fig1cols, 3)
+        # ax1.set_title("Drone vel (m/s)", fontsize=16)
+        # ax1.plot(t_arr, dr_v_hist[:, 0], "k", label="vx")
+        # ax1.plot(t_arr, dr_v_hist[:, 1], "b", label="vy")
+        # ax1.grid(True)
+        # ax1.legend()
+        # ax1 = fig2.add_subplot(fig1rows, fig1cols, 4)
+        # ax1.set_title("P command (m/s)", fontsize=16)
+        # ax1.plot(t_arr, p_cmd_hist[:, 0], "k", label="x")
+        # ax1.plot(t_arr, p_cmd_hist[:, 1], "b", label="y")
+        # ax1.grid(True)
+        # ax1.legend()
+        # ax1 = fig2.add_subplot(fig1rows, fig1cols, 5)
+        # ax1.set_title("I command (m/s)", fontsize=16)
+        # ax1.plot(t_arr, i_cmd_hist[:, 0], "k", label="x")
+        # ax1.plot(t_arr, i_cmd_hist[:, 1], "b", label="y")
+        # ax1.grid(True)
+        # ax1.legend()
         plt.show()
     if path_type == "obstacle":
         fig2 = plt.figure()
