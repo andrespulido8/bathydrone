@@ -13,9 +13,10 @@ from tethered_dynamics import TetheredDynamics
 
 npl = np.linalg
 
-IS_OPEN_LOOP = False
+IS_OPEN_LOOP = True
+
 # TODO: fix open loop with line
-path_type = "obstacle"  # 'lawnmower', 'line', 'obstacle', 'trajectory' or 'data'
+path_type = "data"  # 'lawnmower', 'line', 'obstacle', 'trajectory' or 'data'
 # data can be open or closed loop
 
 # Controller parameters
@@ -397,8 +398,8 @@ if __name__ == "__main__":
     u_world_history = np.zeros((len(t_arr), 3))
     head_dr = np.zeros(len(t_arr))
     dr_v_hist = np.zeros((len(t_arr), ncontrols))
-    p_cmd_hist = np.zeros((len(t_arr), ncontrols))
-    i_cmd_hist = np.zeros((len(t_arr), ncontrols))
+    p_cmd_hist = np.zeros((len(t_arr), 2))
+    i_cmd_hist = np.zeros((len(t_arr), 2))
 
     # Integrate dynamics using first-order forward stepping
     for i, t in enumerate(t_arr):
@@ -471,7 +472,7 @@ if __name__ == "__main__":
         u_world_history[i] = dynamics.ten
         head_dr[i] = np.degrees(np.arctan2(dynamics.diff_pos[1], dynamics.diff_pos[0]))
         if not IS_OPEN_LOOP:
-            dr_v_hist[i] = v_dr[:2]
+            dr_v_hist[i] = v_dr
             p_cmd_hist[i] = p_cmd
             i_cmd_hist[i] = i_cmd
 
@@ -815,8 +816,16 @@ if __name__ == "__main__":
         savemat(filename, data)
         print("Data saved!\n")
 
-    plt.rcParams["text.usetex"] = True
-    plt.rcParams.update({"font.size": 13})
+    plt.style.use("default")
+    plt.rcParams.update(
+        {
+            "text.usetex": True,
+            "font.family": "sans-serif",
+            "font.sans-serif": ["Helvetica"],
+        }
+    )
+    plt.rcParams.update({"font.size": 18})
+
     fig2 = plt.figure()
     ax2 = fig2.add_subplot(1, 1, 1)
     ax2.plot(q_history[:, 0], q_history[:, 1], "--k", label="Boat Traj.")
