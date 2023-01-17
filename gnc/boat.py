@@ -16,7 +16,7 @@ npl = np.linalg
 IS_OPEN_LOOP = False
 
 # TODO: fix open loop with line
-path_type = "data"  # 'lawnmower', 'line', 'obstacle', 'trajectory' or 'data'
+path_type = "trajectory"  # 'lawnmower', 'line', 'obstacle', 'trajectory' or 'data'
 # data can be open or closed loop
 
 # Controller parameters
@@ -312,8 +312,8 @@ if __name__ == "__main__":
             FPR=0.5,
             error_tol=error_tol,
             erf=erf,
-            min_time=1,
-            max_time=20,
+            min_time=0.5,
+            max_time=40,
             max_nodes=1e5,
             goal0=goal0,
         )
@@ -345,7 +345,11 @@ if __name__ == "__main__":
                 planner.set_goal(traj[i, :])
                 sample_space = gen_ss(s0, traj[i, :], [1, 1, 1, 1])
                 planner.update_plan(
-                    s0, sample_space, goal_bias=goal_bias, finish_on_goal=True
+                    s0,
+                    sample_space,
+                    goal_bias=goal_bias,
+                    finish_on_goal=True,
+                    pruning=False,
                 )
                 # get the results  and save them to later use them in order
                 Ts[i] = planner.T
@@ -371,7 +375,7 @@ if __name__ == "__main__":
         T = 150  # s
         dt = 0.001
     elif path_type == "lawnmower":
-        dist_between_pts = 7
+        dist_between_pts = 10
         T = (
             traj.shape[0] * dist_between_pts / 2
         )  # s (decrease dist_between_pts if T is too large)
