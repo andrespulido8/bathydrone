@@ -13,15 +13,15 @@ from tethered_dynamics import TetheredDynamics
 
 npl = np.linalg
 
-IS_OPEN_LOOP = True
+IS_OPEN_LOOP = False
 
 # TODO: fix open loop with line
 path_type = "data"  # 'lawnmower', 'line', 'obstacle', 'trajectory' or 'data'
 # data can be open or closed loop
 
 # Controller parameters
-kp = np.array([0.2, 0.2, 0])
-ki = np.array([0.01, 0.01, 0.0])
+kp = np.array([0.08, 0.08, 0])
+ki = np.array([0.05, 0.05, 0.0])
 kd = np.array([0.0, 0.0, 0.0])
 err_accumulation = np.zeros(2)
 # max_ve = 4*0.44704  # mph to m/s
