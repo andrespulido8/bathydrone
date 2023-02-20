@@ -1,6 +1,6 @@
-# LAST UPDATE: Nicholas Sardinia, Febuary 19 2023
+# LAST UPDATE: Nicholas Sardinia, Febuary 20 2023
 """
-Updated algorithm to rotate polygons to semi-optimal orientation (by minimum number of turns)
+Updated algorithm to generate waypoints for convex polygons (semi-functional)
 """
 
 #!/usr/bin/env python3
@@ -103,7 +103,181 @@ class Path:
             self.pathX.append(currX)
             self.pathY.append(pointsY[0]+rho)
             countCurr = countCurr + 2
-             
+
+class pathPlanner:
+    def __init__(self, pointsX, pointsY, rho):
+        self.pointsX = pointsX
+        self.pointsY = pointsY
+        self.rho = rho
+        self.pathX = []
+        self.pathY = []
+
+
+        pathDirection = 0
+        UP = 1
+        DOWN = -1
+
+        #find point at min X
+        minXDex = 0
+        minX = pointsX[0]
+        for i in range(0, len(pointsX)):
+            if pointsX[i] < minX:
+                minX = pointsX[i]
+                minXDex = i
+
+        #generate starting point of path
+        self.pathX.append(pointsX[minXDex]+3*rho)
+        self.pathY.append(pointsY[minXDex])
+        
+
+        #determine starting movement direction
+        #find closest surrounding points on top / bottom in X.
+        xLeftBot = 0
+        xRightBot = 0
+        xLeftTop = 0
+        xRightTop = 0
+        for i in range(0, len(pointsX)):
+            if pointsY[i] >= self.pathY[0] and pointsX[i] <= self.pathX[0]:
+                xLeftTop = i
+            if pointsY[i] <= self.pathY[0] and pointsX[i] <= self.pathX[0]:
+                xLeftBot = i
+            if pointsY[i] >= self.pathY[0] and pointsX[i] >= self.pathX[0]:
+                xRightTop = i
+            if pointsY[i] <= self.pathY[0] and pointsX[i] >= self.pathX[0]:
+                xRightBot = i
+        
+        """
+        print(pointsY[xRightBot])
+        print(pointsY[xLeftBot])
+        print(pointsX[xLeftBot])
+        print(pointsX[xRightBot])
+
+        print(pointsY[xRightTop])
+        print(pointsY[xLeftTop])
+        print(pointsX[xLeftTop])
+        print(pointsX[xRightTop])
+        print(self.pathY[0])
+        """
+        interpBot = self.pathY[0] - (pointsY[xRightBot]-pointsY[xLeftBot])/(pointsX[xLeftBot]-pointsX[xRightBot])*(rho)
+        interpTop = self.pathY[0] + (pointsY[xRightTop]-pointsY[xLeftTop])/(abs(pointsX[xLeftTop]-pointsX[xRightTop]))*(rho)
+
+        """
+        print(interpBot)
+        print(interpTop)
+        """
+        #Find starting direction of motion
+        if (self.pathY[0] - interpBot >= interpTop-self.pathY[0]):
+            direction = -1
+        else:
+            direction = 1
+
+        #account for initial direction in setup
+        if direction == DOWN:
+            self.pathY[0] = self.pathY[0] - rho
+
+        #print(direction)
+
+        """
+        #Starting direction and position found, now for the wayfinding algorithm.
+        #depending on direction, find either top or bottom. Then, place a point at y: top(curr)-2rho or bottom(curr)+2rho. 
+        #Then, place a second point x: curr + rho and y: top(curr+rho)-2rho or bottom(curr+rho)+rho
+        """
+
+        #find max point in x(stopping criterion)
+        maxX = pointsX[0]
+        for i in range(0, len(pointsX)):
+            if pointsX[i] > maxX:
+                maxX = pointsX[i]
+
+        currDex = 0
+        currX = self.pathX[0]
+        currY = self.pathY[0]
+        
+        while True:
+            if self.pathX[currDex] >= maxX - 2*rho:
+                break
+            if direction == UP:
+                #find upper points and interpolate.
+                if (currDex < 2):
+                    for i in range(0, len(pointsX)):
+                        if pointsY[i] >= currY and pointsX[i] <= currX:
+                            xLeftTop = i
+                        if pointsY[i] >= currY and pointsX[i] >= currX:
+                            xRightTop = i
+                else:
+                    for i in range(0, len(pointsX)):
+                        if pointsY[i] >= self.pathY[currDex-2] and pointsX[i] <= currX:
+                            xLeftTop = i
+                        if pointsY[i] >= self.pathY[currDex-2] and pointsX[i] >= currX:
+                            xRightTop = i
+                slope = (pointsY[xRightTop]-pointsY[xLeftTop])/(pointsX[xRightTop]-pointsX[xLeftTop])
+                interpTop = pointsY[xLeftTop] + slope*(currX-(pointsX[xLeftTop]))
+                #add point
+                self.pathX.append(currX)
+                self.pathY.append(interpTop-rho)
+                #print(self.pathY)
+
+                #move over by rho
+                currY = pointsY[xLeftTop] + slope*(currX-(pointsX[xLeftTop]))
+                self.pathX.append(currX+rho)
+                self.pathY.append(currY)
+                #find upper points and interpolate
+                currX = currX + rho
+                #Update indices
+                currDex = currDex + 2
+                
+                print("top")
+                print(xLeftTop)
+                print(xRightTop)
+                direction = direction * (-1)
+            else:
+                if (currDex < 2):
+                    for i in range(0, len(pointsX)):
+                        if pointsY[i] >= self.pathY[currDex] and pointsX[i] <= self.pathX[currDex]:
+                            xLeftTop = i
+                        if pointsY[i] <= self.pathY[currDex] and pointsX[i] <= self.pathX[currDex]:
+                            xLeftBot = i
+                        if pointsY[i] >= self.pathY[currDex] and pointsX[i] >= self.pathX[currDex]:
+                            xRightTop = i
+                        if pointsY[i] <= self.pathY[currDex] and pointsX[i] >= self.pathX[currDex]:
+                            xRightBot = i
+                else:
+                    for i in range(0, len(pointsX)):
+                        if pointsY[i] >= self.pathY[currDex-2] and pointsX[i] <= self.pathX[currDex]:
+                            xLeftTop = i
+                        if pointsY[i] <= self.pathY[currDex-2] and pointsX[i] <= self.pathX[currDex]:
+                            xLeftBot = i
+                        if pointsY[i] >= self.pathY[currDex-2] and pointsX[i] >= self.pathX[currDex]:
+                            xRightTop = i
+                        if pointsY[i] <= self.pathY[currDex-2] and pointsX[i] >= self.pathX[currDex]:
+                            xRightBot = i
+                slope = (pointsY[xRightBot]-pointsY[xLeftBot])/(pointsX[xLeftBot]-pointsX[xRightBot])
+                interpBot = pointsY[xLeftBot] - (pointsY[xRightBot]-pointsY[xLeftBot])/(pointsX[xLeftBot]-pointsX[xRightBot])*(currX-(pointsX[xLeftBot]))
+
+                #add point
+                #print(interpBot)
+                self.pathX.append(currX)
+                self.pathY.append(interpBot + 2*rho)
+
+                #move over by rho
+                currX = currX + rho
+                currY = interpBot + 2*rho
+                currY = currY - slope*(rho)
+                self.pathX.append(currX)
+                self.pathY.append(currY)
+
+                #Update indices
+                currDex = currDex + 2
+                print("bot")
+                print(xLeftBot)
+                print(pointsY[xLeftBot])
+                print(xRightBot)
+                print(pointsY[xRightBot])
+                direction = direction * (-1)
+
+
+
+        
             
 #Simple optimal sweep direction is parallel to the minimum width direction of the convex polygon
 #This minimizes the number of turns taken by the path
@@ -115,7 +289,7 @@ def findBestSweepDirection(xPoints, yPoints):
     opAngleDist = max(xPoints)-min(xPoints)
     opAngle = 0
     for testAngle in range(1, 360):
-        print(opAngle)
+        #print(opAngle)
         transformAngle = [[np.cos(np.deg2rad(testAngle)), -np.sin(np.deg2rad(testAngle))], [np.sin(np.deg2rad(testAngle)), np.cos(np.deg2rad(testAngle))]]
         tempX = [] 
         for p in range(0, len(xPoints)):
@@ -160,22 +334,22 @@ def plotPath(xPoints, yPoints, bathyPath):
 
     plt.grid()
     myPlot = plt.plot(xPoints, yPoints, marker='o', color='red')
-    plt.plot(bathyPath.pathX, bathyPath.pathY, marker='o', color='green')
+    plt.plot(bathyPath.pathX, bathyPath.pathY, marker='o', color='green', markersize='2')
+    plt.axis('square')
     plt.show()
 
 def main():
     #input closed area as points. 
     xPoints = [0.0, 20.0, 50.0, 100.0, 130.0, 40.0, 0.0]
-    yPoints = [0.0, -20.0, 0.0, 30.0, 60.0, 80.0, 0.0]
+    yPoints = [0.0, -20.0, -10, 30.0, 60.0, 80.0, 0.0]
     
     xRot, yRot = findBestSweepDirection(xPoints, yPoints)
 
     plotGrid(xPoints, yPoints)
-    plotGrid(xRot, yRot)
-   
-    #boatSpecs = HardwareSpecs(1, 1) 
-    #bathyPath = Path(xRot, yRot, boatSpecs.rho)
-    #plotPath(xRot, yRot, bathyPath)
+    #testGrid = plotGrid(xRot, yRot)
+    boatSpecs = HardwareSpecs(1.25, 1.25) 
+    bathyPath = pathPlanner(xRot, yRot, boatSpecs.rho)
+    plotPath(xRot, yRot, bathyPath)
     return 0
 
 
