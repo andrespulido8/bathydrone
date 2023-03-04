@@ -21,89 +21,6 @@ Generates path, starting from lower-left corner.
 # Lawnmower lines for full convex coveragae.
 # Returns path as a series of grid points from bottom left to top right
 """
-class Path:
-    def __init__(self, pointsX, pointsY, rho):
-        self.pointsX = pointsX
-        self.pointsY = pointsY
-        self.rho = rho
-        self.pathX = []
-        self.pathY = []
-        
-        # generate starting point
-        self.pathX.append(pointsX[0]+rho)
-        self.pathY.append(pointsY[0]+rho)
-
-        # generate path
-            # find highest y at current x
-            # add point at highest y - rho
-            # move right by rho
-            # find lowest y at current x
-            # move right by rho
-            # repeat until currentx = max_x
-
-        done = 0
-        currX = self.pointsX[0]+rho
-        currY = self.pathY[0]
-        
-        maxX = 0
-        countCurr = 1
-        closestLeftSave = 0
-        closestRightSave = maxX
-        for i in range(len(self.pointsX)):
-            if (self.pointsX[i] >= self.pointsX[maxX]):
-                maxX = i
-        #print(self.pointsX[maxX])
-        while done != 1:
-           # print("next")
-            if (currX >= self.pointsX[maxX]-rho):
-                done = 1
-                break
-            closestRight = maxX
-            closestLeft = 0
-            #find the x-points that most nearly bound the current x above the current x position
-            for i in range(len(self.pointsX)-1):
-                if (self.pointsX[i] >= self.pointsX[closestLeft] and self.pointsX[i]  < currX):
-                    closestLeft = i
-                if (self.pointsX[i] < self.pointsX[closestRight] and self.pointsX[i]  > currX):
-                    closestRight = i
-                    #print(self.pointsX[closestRight])
-           # print(closestLeft)
-           # print(closestRight)
-            #From the tightest bound on X, we may find the next vertical point by interpolation.
-            if (closestLeftSave != closestLeft or closestRightSave != closestRight):
-                closestLeftSave = closestLeft
-                closestRightSave = closestRight
-                if (countCurr > 3):
-                    countCurr = 1
-            if ((self.pointsX[closestRight] - self.pointsX[closestLeft]) != 0):
-                slope = (self.pointsY[closestRight]-self.pointsY[closestLeft])/(self.pointsX[closestRight] - self.pointsX[closestLeft])
-              #  print(self.pointsY[closestRight]-self.pointsY[closestLeft])
-               # print(self.pointsX[closestRight] - self.pointsX[closestLeft])
-               # print(slope)
-            else:
-                slope = 0
-            vertPos = self.pointsY[closestLeft] + slope*rho*countCurr - 6*rho
-            currY = vertPos
-
-            #add point at vertpos
-            self.pathX.append(currX)
-            self.pathY.append(vertPos)
-
-            #add point to the right of vertpos
-            self.pathX.append(currX+rho)
-            self.pathY.append(vertPos)
-
-            #TODO allow paths below starting x
-            currX = currX + rho
-            self.pathX.append(currX)
-            self.pathY.append(pointsY[0]+rho)
-
-            currX = currX + rho
-            #print(currX)
-            self.pathX.append(currX)
-            self.pathY.append(pointsY[0]+rho)
-            countCurr = countCurr + 2
-
 class pathPlanner:
     def __init__(self, pointsX, pointsY, rho):
         self.pointsX = pointsX
@@ -194,7 +111,7 @@ class pathPlanner:
         currY = self.pathY[0]
         
         while True:
-            if self.pathX[currDex] >= maxX - 2*rho:
+            if self.pathX[currDex] >= maxX:
                 break
             if direction == UP:
                 #find upper points and interpolate.
@@ -214,7 +131,7 @@ class pathPlanner:
                 interpTop = pointsY[xLeftTop] + slope*(currX-(pointsX[xLeftTop]))
                 #add point
                 self.pathX.append(currX)
-                self.pathY.append(interpTop-rho)
+                self.pathY.append(interpTop)
                 #print(self.pathY)
 
                 #move over by rho
@@ -257,11 +174,11 @@ class pathPlanner:
                 #add point
                 #print(interpBot)
                 self.pathX.append(currX)
-                self.pathY.append(interpBot + 2*rho)
+                self.pathY.append(interpBot)
 
                 #move over by rho
                 currX = currX + rho
-                currY = interpBot + 2*rho
+                currY = interpBot
                 currY = currY - slope*(rho)
                 self.pathX.append(currX)
                 self.pathY.append(currY)
@@ -276,9 +193,89 @@ class pathPlanner:
                 direction = direction * (-1)
 
 
+#path_planner improvements
+class pathPlannerMarch:
+    def __init__(self, pointsX, pointsY, rho):
+        self.pointsX = pointsX
+        self.pointsY = pointsY
+        self.rho = rho
+        self.pathX = []
+        self.pathY = []
 
+        pathDirection = 0
+        UP = 1
+        DOWN = -1
+
+        minXDex = 0
+        minX = pointsX[0]
+        for i in range(0, len(pointsX)):
+            if pointsX[i] < minX:
+                minX = pointsX[i]
+                minXDex = i
+
+        self.pathX.append(pointsX[minXDex])
+        self.pathY.append(pointsY[minXDex])
+
+        #First "Iteration Righward" = pointsX[minXDex] + rho
+        firstIter = pointsX[minXDex] + rho
+
+        xLeftBot = 0
+        xRightBot = 0
+        xLeftTop = 0
+        xRightTop = 0
+
+        #Vertical line
+        if (pointsX[0] == pointsX[1]):
+            #there is a vertical line
+            interpTop = pointsY[1]
+        else:
+            for i in range(0, len(pointsX)):
+                if pointsY[i] >= self.pathY[0] and pointsX[i] <= firstIter:
+                    xLeftTop = i
+                if pointsY[i] >= self.pathY[0] and pointsX[i] >= firstIter:
+                    xRightTop = i
+            interpTop = self.pathY[0] + (pointsY[xRightTop]-pointsY[xLeftTop])/(abs(pointsX[xLeftTop]-pointsX[xRightTop]))*(rho)
+        #X-2, because in a closed polygon, the first point will always equal the last point
+        if (pointsX[0] == pointsX[len(pointsX)-2]):
+            #there is a vertical line below our point
+            interpBot = pointsY[len(pointsX)-2]
+        else:
+            for i in range(0, len(pointsX)):
+                if pointsY[i] <= self.pathY[0] and pointsX[i] <= firstIter:
+                    xLeftBot = i
+                if pointsY[i] <= self.pathY[0] and pointsX[i] >= firstIter:
+                        xRightBot = i
+                interpBot = self.pathY[0] - (pointsY[xRightBot]-pointsY[xLeftBot])/(pointsX[xLeftBot]-pointsX[xRightBot])*(rho)
         
+        #Choose path direction and place first waypoint
+        if (self.pathY[0] - interpBot >= interpTop-self.pathY[0]):
+            pathDirection = -1
+            self.pathX.append(firstIter)
+            self.pathY.append(interpBot)
+        else:
+            pathDirection = 1
+            self.pathX.append(firstIter)
+            self.pathY.append(interpTop)
+
+        #Sweep the shape
+
+        #find max point in x(stopping criterion)
+        maxX = pointsX[0]
+        for i in range(0, len(pointsX)):
+            if pointsX[i] > maxX:
+                maxX = pointsX[i]
+
+        currDex = 0
+        currX = self.pathX[0]
+        currY = self.pathY[0]
+
+        #Generates Waypoints
+        while True:
+            currDex = currDex + 1
+            if maxX < pointsX[currDex] + rho:
+                break
             
+                
 #Simple optimal sweep direction is parallel to the minimum width direction of the convex polygon
 #This minimizes the number of turns taken by the path
 def findBestSweepDirection(xPoints, yPoints): 
@@ -340,15 +337,26 @@ def plotPath(xPoints, yPoints, bathyPath):
 
 def main():
     #input closed area as points. 
+
+    #Atshushi's Polygon
     xPoints = [0.0, 20.0, 50.0, 100.0, 130.0, 40.0, 0.0]
     yPoints = [0.0, -20.0, -10, 30.0, 60.0, 80.0, 0.0]
-    
-    xRot, yRot = findBestSweepDirection(xPoints, yPoints)
 
-    plotGrid(xPoints, yPoints)
+    #Square
+    xPointsSq = [0.0, 0.0, 100.0, 100.0, 0.0]
+    yPointsSq = [0.0, 100.0, 100.0, 0.0, 0.0]
+
+    #Irregular Octagon
+    xPointsOct = [0.0, 0.0, 40.0, 80.0, 120.0, 120.0, 75.0, 30.0, 0.0]
+    yPointsOct = [0.0, 60.0, 100.0,  100.0, 70.0, -10.0, -50.0, -50.0, 0.0]
+
+    
+    xRot, yRot = findBestSweepDirection(xPointsOct, yPointsOct)
+
+    plotGrid(xPointsOct, yPointsOct) 
     #testGrid = plotGrid(xRot, yRot)
     boatSpecs = HardwareSpecs(1.25, 1.25) 
-    bathyPath = pathPlanner(xRot, yRot, boatSpecs.rho)
+    bathyPath = pathPlannerMarch(xRot, yRot, boatSpecs.rho)
     plotPath(xRot, yRot, bathyPath)
     return 0
 
