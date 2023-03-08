@@ -3,4 +3,4 @@
 	url = https://github.com/osrf/vrx
 [submodule "gnc/lqRRT"]
 	path = gnc/lqRRT
-	url = git@github.com:uf-mil/lqRRT.git
+	url = git@github.com:andrespulido8/lqRRT.git
