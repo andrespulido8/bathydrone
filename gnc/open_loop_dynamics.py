@@ -4,23 +4,19 @@ Contains a model of a 3DOF marine ship. Supplies parameter values,
 a function for the full nonlinear dynamic. Running this script as
 __main__ will present a quick open-loop simulation.
 
-State is: [x_world_position (m),
-            y_world_position (m),
-            heading_angle_from_x (rad),
-            x_body_velocity (m/s),
-            y_body_velocity (m/s),
-            yaw_rate (rad/s),
-            drone_x_position (m),
-            drone_y_position (m),
-            drone_z_position (m),]
-
-Control input v_dr is: [drone_x_velocity (m/s),
-                        drone_y_velocity (m/s),
-                        drone_z_velocity (m/s),]
+Boat State is: [x_world_position (m),
+                y_world_position (m),
+                heading_angle_from_x (rad),
+                x_body_velocity (m/s),
+                y_body_velocity (m/s),
+                yaw_rate (rad/s)]
 
 Force u is: [x_body_force (N),
              y_body_force (N),
              z_torque (N*m)]
+
+Input dr is: [drone_x_position (m),
+              drone_y_position (m)]
 
 See:
 T. I. Fossen, Handbook of Marine Craft Hydrodynamics
@@ -41,10 +37,10 @@ off_x = 0.1905  # measured from the bathydrone vehicle
 off_z = 0.1016
 r = np.array([off_x, 0, off_z])
 # height of drone above water
-hd = 20*0.3048  # feet to meters
-le = 31*0.3048  # Length of rope
-proj_le = np.sqrt(le**2-hd**2)
-dL = 1  # tolrance lentgh for rope constraint
+hd = 20 * 0.681818  # feet to meters
+le = 31 * 0.681818  # Length of rope
+proj_le = np.sqrt(le**2 - hd**2)
+dL = 1  # tolrance length for rope constraint
 
 # Fluid inertial effects
 wm_xu = -6 * m  # kg        Increase to damp more the yaw wrt to drone
@@ -98,8 +94,9 @@ def get_R(q):
     )
 
 
-class TetheredDynamics:
+class OpenLoopDynamics:
     def __init__(self, ten_mag) -> None:
+        self.dr = np.array([0, 0, 0], dtype=np.float64)
         self.ten = np.array([0, 0, 0], dtype=np.float64)
         self.u = np.array([0, 0, 0], dtype=np.float64)
         self.diff_pos = np.array([0, 0], dtype=np.float64)
@@ -109,27 +106,23 @@ class TetheredDynamics:
         self.mult = 1
         self.dL = dL
 
-    def step(self, s, v_dr, dt):
+    def step(self, q, v_dr, dt):
         """
         Dynamic model of the boat. Returns the derivatives of the state q based on the control input u
         Input:
-            s: state vector
-                q: State of the boat. Vector of position, orientation and velocites
-                dr: Position of the drone in the world frame
-            v_dr: drone velocity (control input)
+            q: State of the boat. Vector of position, orientation and velocites
+            v_dr: drone velocity
         Output:
-            x (t+1): State of the boat and drone at the next time step
+            q (t+1): State of the boat at the next time step
         """
-        q = s[:6]
-        dr = s[6:]
         # Rope length constraint
-        if npl.norm(q[:2] - dr[:2]) >= self.proj_le + dL:
+        if npl.norm(q[:2] - self.dr[:2]) >= self.proj_le + dL:
             v_dr = np.array([0, 0, 0])
 
         R = get_R(q)
-        dr[:2] = dr[:2] + v_dr[:2] * dt if v_dr is not None else dr[:2]
+        self.dr[:2] = self.dr[:2] + v_dr[:2] * dt if v_dr is not None else self.dr[:2]
         app_point = np.array([q[0], q[1], 0]) + R.dot(r)  # world coord
-        self.diff_pos = dr - app_point
+        self.diff_pos = self.dr - app_point
         self.diff_pos = self.diff_pos / npl.norm(self.diff_pos)
 
         self.ten = self.ten_mag * self.diff_pos
@@ -140,7 +133,7 @@ class TetheredDynamics:
         self.ten[2] = moments[2]
 
         # Rope length constraint
-        if npl.norm(q[:2] - dr[:2]) < proj_le - dL:
+        if npl.norm(q[:2] - self.dr[:2]) < proj_le - dL:
             self.u = np.array([0, 0, 0])
         # Centripetal-coriolis matrix
         C = np.array(
@@ -174,6 +167,5 @@ class TetheredDynamics:
         # M*vdot + C*v + D*v = u  and  pdot = R*v
 
         # time rate of change of the state. Velocities and acceleration
-        boat_dyn = np.concatenate((R.dot(q[3:]), Minv.dot(self.u - (C + D).dot(q[3:]))))
-        dyn = np.concatenate((boat_dyn, v_dr))
-        return qplus(s, dyn * dt)
+        dyn = np.concatenate((R.dot(q[3:6]), Minv.dot(self.u - (C + D).dot(q[3:6]))))
+        return qplus(q, dyn * dt)
