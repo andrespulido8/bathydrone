@@ -37,8 +37,8 @@ off_x = 0.1905  # measured from the bathydrone vehicle
 off_z = 0.1016
 r = np.array([off_x, 0, off_z])
 # height of drone above water
-hd = 20*0.681818  # feet to meters
-le = 31*0.681818  # Length of rope
+hd = 20*0.3048  # feet to meters
+le = 31*0.3048  # Length of rope
 proj_le = np.sqrt(le**2-hd**2)
 dL = 1  # tolrance lentgh for rope constraint
 
