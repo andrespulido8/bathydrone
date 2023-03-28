@@ -6,47 +6,123 @@ import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-
 from lqRRT import lqrrt
+from open_loop_dynamics import OpenLoopDynamics
 from path_planning import pp
 from tethered_dynamics import TetheredDynamics
 
 npl = np.linalg
 
-path_type = 'data'  # 'lawnmower', 'line' or 'data'
+IS_OPEN_LOOP = False
 
-IS_OPEN_LOOP = False 
-kp = np.repeat(0.15, 2)
-ki = np.repeat(0.00005, 2)
-kd = np.repeat(0, 2)
+# TODO: fix open loop with line
+path_type = "data"  # 'lawnmower', 'line', 'obstacle', 'trajectory' or 'data'
+# data can be open or closed loop
+
+# Controller parameters
+kp = np.array([0.08, 0.08, 0])
+ki = np.array([0.05, 0.05, 0.0])
+kd = np.array([0.0, 0.0, 0.0])
 err_accumulation = np.zeros(2)
-max_ve = 4*0.44704  # mph to m/s 
-saturation = np.repeat(2.0, 2)
-tolerance = 0.02  # meters
-err_reset_dist = 10
-is_debug = False 
+# max_ve = 4*0.44704  # mph to m/s
+saturation = np.repeat(1.8, 2)  # max vel of drone [m/s]
+tolerance = 0.2  # meters
+traj_tolerance = 15.0
+err_reset_dist = 50
+is_debug = False
 
-if path_type == 'data':
+if path_type == "data" or path_type == "line":
     # Trajectory
-    echo_3_051722 = pd.read_csv('./traj_data/force_traj_3.csv')
-    echo_6_051722 = pd.read_csv('./traj_data/force_traj_6.csv')
-    echo_9_051722 = pd.read_csv('./traj_data/force_traj_9.csv')
-    echo_12_051722 = pd.read_csv('./traj_data/force_traj_12.csv')
-    drone_3 = pd.read_csv('./traj_data/drone_traj_3.csv')
-    drone_6 = pd.read_csv('./traj_data/drone_traj_6.csv')
-    drone_9 = pd.read_csv('./traj_data/drone_traj_9.csv')
-    drone_12 = pd.read_csv('./traj_data/drone_traj_12.csv')
+    echo_3_051722 = pd.read_csv("./traj_data/force_traj_3.csv")
+    echo_6_051722 = pd.read_csv("./traj_data/force_traj_6.csv")
+    echo_9_051722 = pd.read_csv("./traj_data/force_traj_9.csv")
+    echo_12_051722 = pd.read_csv("./traj_data/force_traj_12.csv")
+    drone_3 = pd.read_csv("./traj_data/drone_traj_3.csv")
+    drone_6 = pd.read_csv("./traj_data/drone_traj_6.csv")
+    drone_9 = pd.read_csv("./traj_data/drone_traj_9.csv")
+    drone_12 = pd.read_csv("./traj_data/drone_traj_12.csv")
     echos = [echo_3_051722, echo_6_051722, echo_9_051722, echo_12_051722]
     drones = [drone_3, drone_6, drone_9, drone_12]
-elif path_type == 'lawnmower':
-    sp1=[0,0]
-    sp2=[160,160]
-    dx=40
-    dy=40
-    is_plot=True
-    path = pp(sp1,sp2,dx,dy,is_plot).path()
+elif path_type == "lawnmower" or path_type == "trajectory":
+    sp1 = [0, 0]
+    sp2 = [120, 80]
+    dy = 60
+    is_plot = False
+    planning = pp(sp1, sp2, dy, is_plot)
+    traj = planning.trajectory(max_vel=saturation[0])
+    traj = traj[: traj.shape[0] // 2, :]  # short data
 
 tension_magnitudes = [9, 11, 18, 27.5]
+
+## Trajectory Planning
+nstates = 9
+ncontrols = 3
+# Vehicle dimensions
+boat_length = 1  # m
+boat_width = 0.5  # m
+goal_buffer = [2, 2, np.inf, np.inf, np.inf, np.inf, np.inf, np.inf, np.inf]
+error_tol = np.copy(goal_buffer) / 2
+if path_type == "obstacle":
+    obs = np.array(
+        [
+            [3, -2, 2],
+        ]
+    )
+    # Goals for the drone position ignored
+    goal = [10, 10, np.deg2rad(90), 0, 0, 0, 0, 0, 0]
+elif path_type == "trajectory":
+    obs = []
+goal_bias = [0.3, 0.3, 0, 0, 0, 0, 0, 0, 0]
+
+
+def gen_ss(seed, goal, buff=[1] * 4):
+    """
+    Returns a sample space given a seed state, goal state, and buffer.
+    The drone position is not sampled because it is determined by the
+    control input.
+    """
+    return [
+        (min([seed[0], goal[0]]) - buff[0], max([seed[0], goal[0]]) + buff[1]),
+        (min([seed[1], goal[1]]) - buff[2], max([seed[1], goal[1]]) + buff[3]),
+        (-np.pi, np.pi),
+        (-0.0, 2),
+        (-0.2, 0.2),
+        (-0.8, 0.8),
+        (seed[6], seed[6]),
+        (seed[7], seed[7]),
+        (seed[8], seed[8]),
+    ]
+
+
+# Definition of collision
+def is_feasible(x, u):
+    for ob in obs:
+        if npl.norm(x[:2] - ob[:2]) <= boat_length / 2 + ob[2]:
+            return False
+    return True
+
+
+def erf(xgoal, x):
+    """Returns error e given two states xgoal and x.
+    Angle differences are taken properly on SO3."""
+    e = xgoal - x
+    c = np.cos(x[2])
+    s = np.sin(x[2])
+    cg = np.cos(xgoal[2])
+    sg = np.sin(xgoal[2])
+    e[2] = np.arctan2(sg * c - cg * s, cg * c + sg * s)
+    return e
+
+
+def lqr(x, u):
+    """Returns cost-to-go matrix S and policy matrix K given local state x and effort u."""
+    global kp, kd
+    kp_mat = np.diag(kp)
+    kd_mat = np.diag(kd)
+    S = np.diag([1, 1, 0.1, 0.0, 0.0, 0.1, 0, 0, 0])
+    K = np.hstack((kp_mat, kd_mat, np.zeros((3, 3))))
+    return (S, K)
+
 
 def get_boat_position(t, ii):
     """
@@ -57,18 +133,17 @@ def get_boat_position(t, ii):
             for data it finds the index of the data time that most
             closely match the simulation time
     """
-    if path_type == 'line' and not IS_OPEN_LOOP:
+    if path_type == "line" and not IS_OPEN_LOOP:
         raise ValueError('Path type "line" is only for open loop simulations')
-    elif path_type == 'data':
-        t_i = df_dr['time'].iloc[ii]
+    else:
+        t_i = df_dr["time"].iloc[ii]
         while t_i <= t:
-            t_i = df_dr['time'].iloc[ii]
+            t_i = df_dr["time"].iloc[ii]
             ii += 1
-        x = df_bt['X_m'].iloc[ii]
-        y = df_bt['Y_m'].iloc[ii]
-        return np.array([x, y, 0]), ii
-    elif path_type == 'lawnmower':
-        path = 0  # TODO: implement
+        x = df_bt["X_m"].iloc[ii]
+        y = df_bt["Y_m"].iloc[ii]
+        return np.array([x, y, 0, 0, 0, 0]), ii
+
 
 def get_drone_position(t, hd, ii):
     """
@@ -80,331 +155,602 @@ def get_drone_position(t, hd, ii):
             for data it finds the index of the data time that most
             closely match the simulation time
     """
-    if path_type == 'line':
-        return np.array([0.7*t, 0.7*t, hd]), 0
-    elif path_type == 'data':
-        t_i = df_dr['time'].iloc[ii]
+    if path_type == "line":
+        return np.array([0.7 * t, 0.7 * t, hd]), 0
+    elif path_type == "data":
+        t_i = df_dr["time"].iloc[ii]
         while t_i <= t:
-            t_i = df_dr['time'].iloc[ii]
+            t_i = df_dr["time"].iloc[ii]
             ii += 1
-        x = df_dr['X_m'].iloc[ii]
-        y = df_dr['Y_m'].iloc[ii]
+        x = df_dr["X_m"].iloc[ii]
+        y = df_dr["Y_m"].iloc[ii]
         return np.array([x, y, hd]), ii
 
-def pid_controller(t, t_last, q, q_ref , q_dot, q_ref_dot):
-    """ calculate the control input (velocity) based on the desired 
-        trajectory
+
+def pid_controller(t, t_last, q, q_ref, q_dot, q_ref_dot, err_accumulation):
+    """calculate the control input (velocity) based on the desired
+    trajectory
     """
-    global err_accumulation
     command = np.array([0, 0])
     dt = np.array(t - t_last)
 
     # Calculate error in position, orientation, and twist (velocities)
-    position_error = q_ref - q 
-    vel_error = q_ref_dot - q_dot 
+    position_error = q_ref - q
+    vel_error = q_ref_dot - q_dot
     if np.any(kd):
-        feedback_derivative = vel_error*kd 
+        feedback_derivative = vel_error[:2] * kd[:2]
 
     # Integral of error (and clip if too large)
-    err_accumulation = err_accumulation + position_error*dt
+    err_accumulation = err_accumulation + position_error * dt
 
     # Calculate feedback
-    feedback_proportional = position_error*kp 
-    feedback_integral = err_accumulation*ki
+    feedback_proportional = position_error * kp[:2]
+    feedback_integral = err_accumulation * ki[:2]
     if np.any(kd):
         feedback = feedback_proportional + feedback_derivative + feedback_integral
     else:
         feedback = feedback_proportional + feedback_integral
-        
+
     command = np.clip(feedback, -saturation, saturation)
 
     if np.abs(position_error[0]) < tolerance:
         # do not move if position error is small
-        print('Position error x is small: ', position_error[0]) if is_debug else None
+        print("Position error x is small: ", position_error[0]) if is_debug else None
         command[0] = 0
     if np.abs(position_error[1]) < tolerance:
         # do not move if position error is small
-        print('Position error y is small: ', position_error[1]) if is_debug else None
+        print("Position error y is small: ", position_error[1]) if is_debug else None
         command[0] = 0
-    elif np.abs(position_error[0]) > err_reset_dist or np.abs(position_error[1]) > err_reset_dist:
-        # delete accumulated error if error is large 
-        err_accumulation /= 10
+    elif (
+        np.abs(position_error[0]) > err_reset_dist
+        or np.abs(position_error[1]) > err_reset_dist
+    ):
+        # delete accumulated error if error is large
+        err_accumulation /= 2
 
     if is_debug:
-        print("Feedback proportional: {}".format(
-            feedback_proportional))
+        print(f"Feedback proportional: {feedback_proportional}")
         if np.any(kd):
-            print("Feedback derivative: {}".format(
-                feedback_derivative))
-        print("feedback integral: {}".format(feedback_integral))
-        print("command: {}".format(command))
+            print(f"Feedback derivative: {feedback_derivative}")
+        print(f"feedback integral: {feedback_integral}")
+        print(f"command: {command}")
 
-    return command, feedback_proportional, feedback_integral    
+    command = np.array([command[0], command[1], 0])
+    return command, feedback_proportional, feedback_integral, err_accumulation
+
 
 def get_R(q):
-    """ Rotation matrix (orientation, converts body to world)"""
-    return np.array([
-        [np.cos(q[2]), -np.sin(q[2]), 0],
-        [np.sin(q[2]),  np.cos(q[2]), 0],
-        [0,             0, 1]
-    ])
+    """Rotation matrix (orientation, converts body to world)"""
+    return np.array(
+        [[np.cos(q[2]), -np.sin(q[2]), 0], [np.sin(q[2]), np.cos(q[2]), 0], [0, 0, 1]]
+    )
+
 
 # SIMULATION
 if __name__ == "__main__":
 
-    if path_type == 'data':
+    data_file_index = 1
+    if path_type == "data" or path_type == "line":
         # Choose one option from the datasets (drones and echos)
-        df_dr = drones[1]
-        df_bt = echos[1]
+        df_dr = drones[data_file_index]
+        df_bt = echos[data_file_index]
 
         # Fix delta in time
-        #kk = np.argmax(df_dr['Y_m'].to_numpy() <= df_bt['Y_m'].to_numpy()[0])
-        #tt = df_dr["time"].to_numpy()[80]
+        # kk = np.argmax(df_dr['Y_m'].to_numpy() <= df_bt['Y_m'].to_numpy()[0])
+        # tt = df_dr["time"].to_numpy()[80]
         # up to 76 index is garbage data
         df_dr["time"] = df_dr["time"] - df_dr["time"].to_numpy()[76]
         df_dr = df_dr.drop(df_dr.index[range(0, 76)])
-    ten_mag = tension_magnitudes[1]  # choose magnitude depending on the drones dataset 
+
+    # choose magnitude depending on the drones dataset
+    ten_mag = tension_magnitudes[data_file_index]
     i_last = 0
     ii_last = 0
     t_last = 0
 
-    # Simulation duration, timestep and animation parameters
-    t0 = 0
-    if path_type == 'line':
-        T = 60  # s
-        dt = 0.001
-    elif path_type == 'data':
-        T = np.min([df_bt['time1'].to_numpy()[-1],df_dr['time'].to_numpy()[-1]])
-        dt = 0.01
-
-    # Matplotlib Animation Parameters 
-    framerate = 20  # fps
-    speedup = 100  # kinda makes the playback a little faster
-    store_data = False  # should data be stored into a .mat?
-    outline_path = True  # show path outline on animation?
-
-    dynamics = TetheredDynamics(ten_mag=ten_mag)
+    if IS_OPEN_LOOP:
+        dynamics = OpenLoopDynamics(ten_mag=ten_mag)
+    else:
+        dynamics = TetheredDynamics(ten_mag=ten_mag)
     # Initial condition
     # State: [m, m, rad, m/s, m/s, rad/s]
-    x0 = -14
-    if path_type == 'line' or path_type == 'lawnmower':
-        q0 = np.array([x0, -np.sqrt(dynamics.proj_le**2 - x0**2),
-                       0, 0, 0, 0], dtype=np.float64)
-        dynamics.dr = np.array([0, 0, 0], dtype=np.float64)  # [m, m, rad]
-    elif path_type == 'data':
-        jj = np.argmax(df_dr['time'].to_numpy() >= t0)
-        #q0 = np.array([x0 + df_dr['X_m'].iloc[jj],
+    x0 = -5
+    if (
+        path_type == "line"
+        or path_type == "lawnmower"
+        or path_type == "obstacle"
+        or path_type == "trajectory"
+    ):
+        y0 = 0 if path_type == "obstacle" else 30
+        dr0 = np.array([2, y0, 0], dtype=np.float64)  # [m, m, rad]
+        q0 = np.array(
+            [
+                dr0[0] + x0,
+                dr0[1] - np.sqrt(dynamics.proj_le**2 - x0**2),
+                0,
+                0,
+                0,
+                0,
+            ],
+            dtype=np.float64,
+        )
+        goal_counter = 0
+        index_counter = 0
+        is_same_goal = False
+    elif path_type == "data":
+        jj = np.argmax(df_dr["time"].to_numpy() >= 0)
+        # q0 = np.array([x0 + df_dr['X_m'].iloc[jj],
         #        np.sqrt(proj_le**2 - x0**2) + df_dr['Y_m'].iloc[jj],
         #        0, 0, 0, 0], dtype=np.float64)
-        q0 = np.array([df_bt['X_m'].iloc[jj], df_bt['Y_m'].iloc[jj],
-                0, 0, 0, 0], dtype=np.float64)
-        dynamics.dr, _ = get_drone_position(t_last, dynamics.hd, i_last)
+        q0 = np.array(
+            [df_bt["X_m"].iloc[jj], df_bt["Y_m"].iloc[jj], 0, 0, 0, 0], dtype=np.float64
+        )
+        dr0, _ = get_drone_position(t_last, dynamics.hd, i_last)
+    dr = np.copy(dr0)
     q = np.copy(q0)
+    x = np.concatenate((q0, dr0))
+
+    if path_type == "obstacle" or path_type == "trajectory":
+        constraints = lqrrt.Constraints(
+            nstates=nstates,
+            ncontrols=ncontrols,
+            goal_buffer=goal_buffer,
+            is_feasible=is_feasible,
+        )
+        if path_type == "obstacle":
+            goal0 = goal
+        else:
+            goal0 = None
+            T_last = 0
+
+        planner = lqrrt.Planner(
+            dynamics.step,
+            lqr,
+            constraints,
+            horizon=2,
+            dt=0.01,
+            FPR=0.5,
+            error_tol=error_tol,
+            erf=erf,
+            min_time=1,
+            max_time=20,
+            max_nodes=1e5,
+            goal0=goal0,
+        )
+        t_delta = 5
+        real_tol = [
+            2,
+            2,
+            np.deg2rad(20),
+            np.inf,
+            np.inf,
+            np.inf,
+            np.inf,
+            np.inf,
+            np.inf,
+        ]
+
+        if path_type == "obstacle":
+            sample_space = gen_ss(x, goal0, [1, 1, 1, 1])
+            planner.update_plan(
+                np.copy(x), sample_space, goal_bias=goal_bias, finish_on_goal=True
+            )
+        else:
+            s0 = np.copy(x)
+            get_state_history = []
+            u_ref_history = []
+            Ts = np.zeros(traj.shape[0])
+            for i in range(traj.shape[0]):
+                # go to new waypoint, generate and plan the path
+                planner.set_goal(traj[i, :])
+                sample_space = gen_ss(s0, traj[i, :], [1, 1, 1, 1])
+                planner.update_plan(
+                    s0, sample_space, goal_bias=goal_bias, finish_on_goal=True
+                )
+                # get the results  and save them to later use them in order
+                Ts[i] = planner.T
+                states = np.zeros((int(planner.T / 0.01) + 1, 9))
+                efforts = np.zeros((int(planner.T / 0.01) + 1, 3))
+                for ii, t in enumerate(np.arange(0, planner.T, 0.01)):
+                    states[ii] = planner.get_state(t)
+                    efforts[ii] = planner.get_effort(t)
+                get_state_history.append(states)
+                u_ref_history.append(efforts)
+                # next initial state
+                s0 = planner.get_state(planner.T)
+                print("Goal: ", traj[i, :])
+                print("Goal number: ", i)
+
+    print("=" * 50)
+    print("Starting simulation")
+    print(f"dr0: {dr0}")
+    print(f"q0: {q0}")
+    # Simulation duration, timestep and animation parameters
+    t0 = 0
+    if path_type == "line":
+        T = 150  # s
+        dt = 0.001
+    elif path_type == "lawnmower":
+        dist_between_pts = 7
+        T = (
+            traj.shape[0] * dist_between_pts / 2
+        )  # s (decrease dist_between_pts if T is too large)
+        dt = 0.01
+    elif path_type == "data":
+        T = np.min([df_bt["time1"].to_numpy()[-1], df_dr["time"].to_numpy()[-1]])
+        dt = 0.01
+    elif path_type == "obstacle":
+        T = planner.T
+        dt = 0.01
+    elif path_type == "trajectory":
+        dt = 0.01
+        T = Ts.sum()
+    print("T: ", T)
 
     # Define time domain
     t_arr = np.arange(t0, T, dt)
 
     # Preallocate results memory
-    q_history = np.zeros((len(t_arr), len(q)))
-    dr_history = np.zeros((len(t_arr), int(len(q)/2)))
-    bt_history = np.zeros((len(t_arr), int(len(q)/2)))
-    u_history = np.zeros((len(t_arr), int(len(q)/2)))
-    u_world_history = np.zeros((len(t_arr), int(len(q)/2)))
-    head_dr = np.zeros((len(t_arr)))
-    dr_v_hist = np.zeros((len(t_arr), 2)) 
+    q_history = np.zeros((len(t_arr), 6))
+    bt_history = np.zeros((len(t_arr), 6))
+    dr_history = np.zeros((len(t_arr), 3))
+    u_history = np.zeros((len(t_arr), 3))
+    u_world_history = np.zeros((len(t_arr), 3))
+    head_dr = np.zeros(len(t_arr))
+    dr_v_hist = np.zeros((len(t_arr), ncontrols))
     p_cmd_hist = np.zeros((len(t_arr), 2))
     i_cmd_hist = np.zeros((len(t_arr), 2))
 
     # Integrate dynamics using first-order forward stepping
     for i, t in enumerate(t_arr):
 
-        if df_dr.shape[0] == i:
-            print('End of data')
-
-        # Rope length constraint
-        if npl.norm(q[:2] - dynamics.dr[:2]) <= dynamics.proj_le or t == 0.0:
-            if IS_OPEN_LOOP:
+        q_dot = q[3:6]
+        if IS_OPEN_LOOP:
+            if npl.norm(q[:2] - dr[:2]) <= dynamics.proj_le + dynamics.dL:
                 dynamics.dr, i_last = get_drone_position(t_last, dynamics.hd, i_last)
-            else:
+                t_last += dt
+            q_ref, ii_last = get_boat_position(t, ii_last)
+            v_dr = np.array([0, 0, 0])
+        else:
+            if path_type == "data":
                 # q_ref is boat position from the data
                 q_ref, ii_last = get_boat_position(t, ii_last)
-
-                # closed loop controller
-                q_dot = 0
                 q_ref_dot = 0
-                v_dr, p_cmd, i_cmd = pid_controller(t, t_last, q[:2], q_ref[:2], q_dot, q_ref_dot)
+            elif path_type == "obstacle":
+                # Planner's decision
+                u_ref = planner.get_effort(t)
+                q_ref = planner.get_state(t)
+                q_ref_dot = q_ref[3:6]
+            elif path_type == "lawnmower":
+                if traj.shape[0] == ii_last:
+                    print("End of data. Time=", t)
+                    break
+                q_ref = traj[ii_last]
+                q_ref_dot = traj[ii_last][3:6]
+                ee = erf(q_ref[:3], np.copy(q[:3]))
+                if npl.norm(ee[:2]) < traj_tolerance:
+                    ii_last = ii_last + 1
+            elif path_type == "trajectory":
+                # TIME ATTEMPT
+                # if t > t_delta:
+                #    planner.set_goal(traj[goal_counter, :])
+                #    planner.update_plan(
+                #        q, sample_space, goal_bias=goal_bias, finish_on_goal=True
+                #    )
+                #    t_delta += t_delta
+                # err_now = np.abs(erf(traj[goal_counter, :], q))
+                # if np.all(err_now <= real_tol):
+                #    goal_counter += 1
+                # q_ref = planner.get_state(t)
+                # q_ref_dot = q_ref[3:]
+
+                if t >= T_last + Ts[goal_counter]:
+                    T_last += Ts[goal_counter]
+                    goal_counter += 1
+                    index_counter = 0
+                    if goal_counter >= traj.shape[0]:
+                        print("End of data. Time=", t)
+                        break
+
+                u_ref = u_ref_history[goal_counter][index_counter]
+                q_ref = get_state_history[goal_counter][index_counter]
+                # u_ref = u_ref_history[goal_counter].get_effort(t - T_last)
+                # q_ref = plan_history[goal_counter].get_state(t - T_last)
+                q_ref_dot = q_ref[3:6]
+                index_counter += 1
+
+            v_dr, p_cmd, i_cmd, err_accumulation = pid_controller(
+                t, t_last, q[:2], q_ref[:2], q_dot, q_ref_dot, err_accumulation
+            )
+            v_dr = np.copy(u_ref) if path_type == "obstacle" else v_dr
             t_last += dt
-        else:
-            v_dr = np.array([0,0])
-        
+
+        bt_history[i] = q_ref[:6]
         q_history[i] = q
-        dr_history[i] = dynamics.dr
+        dr_history[i] = dr
         u_history[i] = dynamics.u
         u_world_history[i] = dynamics.ten
-        head_dr[i] = np.degrees(np.arctan2(dynamics.diff_pos[1],dynamics.diff_pos[0]))
+        head_dr[i] = np.degrees(np.arctan2(dynamics.diff_pos[1], dynamics.diff_pos[0]))
         if not IS_OPEN_LOOP:
-            bt_history[i] = q_ref 
             dr_v_hist[i] = v_dr
             p_cmd_hist[i] = p_cmd
             i_cmd_hist[i] = i_cmd
 
         # Step forward, qnext = qlast + qdot*dt
-        q = dynamics.step(q, v_dr, dt)
-    
+        x = np.concatenate((q, dr))
+        x = dynamics.step(x, v_dr, dt)
+        q = x[:6]
+        dr = x[6:]
+
     ## PLOTS
+    print("\nPlotting...")
 
     # Figure for individual results
     fig1 = plt.figure()
-    fig1.suptitle('State Evolution', fontsize=20)
+    fig1.suptitle("State Evolution", fontsize=20)
     fig1rows = 2
     fig1cols = 5
 
     # Plot x position
     ax = fig1.add_subplot(fig1rows, fig1cols, 1)
-    ax.set_title('X Position (m)', fontsize=16)
-    ax.plot(t_arr, q_history[:, 0], 'g', label="sim boat")
-    ax.plot(t_arr, dr_history[:, 0], 'b', label="drone")
-    if path_type == 'data': ax.plot(t_arr, bt_history[:,0], 'r', label='boat reference (data)')
+    ax.set_title("X Position (m)", fontsize=16)
+    ax.plot(t_arr, q_history[:, 0], "-g", label="sim boat")
+    ax.plot(t_arr, dr_history[:, 0], "--b", label="drone")
+    if not IS_OPEN_LOOP:
+        ax.plot(t_arr, bt_history[:, 0], "-.r", label="boat reference boat(data)")
+        ax.plot(t_arr, bt_history[:, 0] - traj_tolerance, "--r")
+        ax.plot(t_arr, bt_history[:, 0] + traj_tolerance, "--r")
     ax.grid(True)
     ax.legend()
-
     # Plot y position
     ax = fig1.add_subplot(fig1rows, fig1cols, 2)
-    ax.set_title('Y Position (m)', fontsize=16)
-    ax.plot(t_arr, q_history[:, 1], 'g',
-            t_arr, dr_history[:, 1], 'b')
-    if path_type == 'data': ax.plot(t_arr, bt_history[:,1], 'r')
+    ax.set_title("Y Position (m)", fontsize=16)
+    ax.plot(t_arr, q_history[:, 1], "-g", t_arr, dr_history[:, 1], "--b")
+    if not IS_OPEN_LOOP:
+        ax.plot(t_arr, bt_history[:, 1], "-.r")
+        ax.plot(t_arr, bt_history[:, 1] - traj_tolerance, "--r")
+        ax.plot(t_arr, bt_history[:, 1] + traj_tolerance, "--r")
     ax.grid(True)
 
     # Plot orientation
     ax = fig1.add_subplot(fig1rows, fig1cols, 3)
-    ax.set_title('Heading (deg)', fontsize=16,)
-    ax.plot(t_arr, np.rad2deg(q_history[:, 2]), 'g', label="sim boat heading")
-    ax.plot(t_arr, head_dr, 'k', label='heading from boat to drone')
+    ax.set_title(
+        "Heading (deg)",
+        fontsize=16,
+    )
+    ax.plot(t_arr, np.rad2deg(q_history[:, 2]), "g", label="sim boat heading")
+    ax.plot(t_arr, head_dr, "k", label="heading from boat to drone")
     ax.grid(True)
     ax.legend()
 
     # Plot control efforts
     ax = fig1.add_subplot(fig1rows, fig1cols, 4)
-    ax.set_title('Body-fixed Wrench (N, N, N*m)', fontsize=16)
-    ax.plot(t_arr, u_history[:, 0], 'b', label='x [N]')
-    ax.plot(t_arr, u_history[:, 1], 'g', label='y [N]')
-    ax.plot(t_arr, u_history[:, 2], 'r', label='z [N m]')
+    ax.set_title("Body-fixed Wrench (N, N, N*m)", fontsize=16)
+    ax.plot(t_arr, u_history[:, 0], "b", label="x [N]")
+    ax.plot(t_arr, u_history[:, 1], "g", label="y [N]")
+    ax.plot(t_arr, u_history[:, 2], "r", label="z [N m]")
     ax.legend()
     ax.grid(True)
 
     # Plot x velocity
     ax = fig1.add_subplot(fig1rows, fig1cols, 6)
-    ax.set_title('Surge (m/s)', fontsize=16)
-    ax.plot(t_arr, q_history[:, 3], 'g',)
-    ax.set_xlabel('Time (s)')
+    ax.set_title("Surge (m/s)", fontsize=16)
+    ax.plot(
+        t_arr,
+        q_history[:, 3],
+        "g",
+    )
+    ax.set_xlabel("Time (s)")
     ax.grid(True)
 
     # Plot y velocity
     ax = fig1.add_subplot(fig1rows, fig1cols, 7)
-    ax.set_title('Sway (m/s)', fontsize=16)
-    ax.plot(t_arr, q_history[:, 4], 'g',)
-    ax.set_xlabel('Time (s)')
+    ax.set_title("Sway (m/s)", fontsize=16)
+    ax.plot(
+        t_arr,
+        q_history[:, 4],
+        "g",
+    )
+    ax.set_xlabel("Time (s)")
     ax.grid(True)
 
     # Plot yaw velocity
     ax = fig1.add_subplot(fig1rows, fig1cols, 8)
-    ax.set_title('Yaw (deg/s)', fontsize=16)
-    ax.plot(t_arr, np.rad2deg(q_history[:, 5]), 'g',)
-    ax.set_xlabel('Time (s)')
+    ax.set_title("Yaw (deg/s)", fontsize=16)
+    ax.plot(
+        t_arr,
+        np.rad2deg(q_history[:, 5]),
+        "g",
+    )
+    ax.set_xlabel("Time (s)")
     ax.grid(True)
 
     # Wrench in world frame
     ax = fig1.add_subplot(fig1rows, fig1cols, 5)
-    ax.set_title('World Wrench [N, N, Nm]', fontsize=16)
-    ax.plot(t_arr, u_world_history[:, 0], 'b', label='x [N]')
-    ax.plot(t_arr, u_world_history[:, 1], 'g', label='y [N]')
-    ax.plot(t_arr, u_world_history[:, 2], 'r', label='z [N m]')
-    ax.set_xlabel('Time (s)')
+    ax.set_title("World Wrench [N, N, Nm]", fontsize=16)
+    ax.plot(t_arr, u_world_history[:, 0], "b", label="x [N]")
+    ax.plot(t_arr, u_world_history[:, 1], "g", label="y [N]")
+    ax.plot(t_arr, u_world_history[:, 2], "r", label="z [N m]")
+    ax.set_xlabel("Time (s)")
     ax.legend()
     ax.grid(True)
 
     # Dist drone and boat
     ax = fig1.add_subplot(fig1rows, fig1cols, 9)
-    ax.set_title('Distance drone and boat (m)', fontsize=16)
-    ax.plot(t_arr, dr_history[:, 0] - q_history[:, 0], 'b', label='x [m]')
-    ax.plot(t_arr, dr_history[:, 1] - q_history[:, 1], 'g', label='y [m]')
-    ax.set_xlabel('Time (s)')
+    ax.set_title("Distance drone and boat (m)", fontsize=16)
+    ax.plot(t_arr, dr_history[:, 0] - q_history[:, 0], "b", label="x [m]")
+    ax.plot(t_arr, dr_history[:, 1] - q_history[:, 1], "g", label="y [m]")
+    ax.set_xlabel("Time (s)")
     ax.legend()
     ax.grid(True)
 
     # Dist norm drone and boat
     ax = fig1.add_subplot(fig1rows, fig1cols, 10)
-    ax.set_title('Norm of Distance (m)', fontsize=16)
-    ax.plot(t_arr, np.sqrt((q_history[:, 0] - dr_history[:, 0])**2 + (
-        q_history[:, 1] - dr_history[:, 1])**2), 'k')
-    ax.plot([t_arr[0], t_arr[-1]], [dynamics.proj_le, dynamics.proj_le], '-r', label='rope length')
-    ax.set_xlabel('Time (s)')
+    ax.set_title("Norm of Distance (m)", fontsize=16)
+    ax.plot(
+        t_arr,
+        np.sqrt(
+            (q_history[:, 0] - dr_history[:, 0]) ** 2
+            + (q_history[:, 1] - dr_history[:, 1]) ** 2
+        ),
+        "k",
+    )
+    ax.plot(
+        [t_arr[0], t_arr[-1]],
+        [dynamics.proj_le, dynamics.proj_le],
+        "-r",
+        label="rope length",
+    )
+    ax.plot(
+        [t_arr[0], t_arr[-1]],
+        [dynamics.proj_le - dynamics.dL, dynamics.proj_le - dynamics.dL],
+        "--g",
+        label="force threshold",
+    )
+    ax.plot(
+        [t_arr[0], t_arr[-1]],
+        [dynamics.proj_le + dynamics.dL, dynamics.proj_le + dynamics.dL],
+        "-g",
+        label="no v_dr threshold",
+    )
+    ax.set_xlabel("Time (s)")
     ax.legend()
     ax.grid(True)
     plt.show()
-
-    if path_type == 'data': 
-        print("Mean Square Error X: ", np.mean((q_history[:, 0] - bt_history[:, 0])**2))
-        print("Mean Square Error Y: ", np.mean((q_history[:, 1] - bt_history[:, 1])**2))
+    if not IS_OPEN_LOOP:
+        print(
+            "Mean Square Error X: ", np.mean((q_history[:, 0] - bt_history[:, 0]) ** 2)
+        )
+        print(
+            "Mean Square Error Y: ", np.mean((q_history[:, 1] - bt_history[:, 1]) ** 2)
+        )
         fig2 = plt.figure()
-        fig2.suptitle('Error Evolution', fontsize=20)
+        fig2.suptitle("Error Evolution", fontsize=20)
         fig1rows = 1
-        fig1cols = 5  
+        fig1cols = 5
         ax1 = fig2.add_subplot(fig1rows, fig1cols, 1)
-        ax1.set_title('X Error (m)', fontsize=16)
-        ax1.plot(t_arr, bt_history[:, 0] - q_history[:, 0], 'k')
+        ax1.set_title("X Error (m)", fontsize=16)
+        ax1.plot(t_arr, bt_history[:, 0] - q_history[:, 0], "k")
         ax1.grid(True)
         ax1 = fig2.add_subplot(fig1rows, fig1cols, 2)
-        ax1.set_title('Y Error (m)', fontsize=16)
-        ax1.plot(t_arr, bt_history[:, 1] - q_history[:, 1], 'b')
+        ax1.set_title("Y Error (m)", fontsize=16)
+        ax1.plot(t_arr, bt_history[:, 1] - q_history[:, 1], "b")
         ax1.grid(True)
         ax1 = fig2.add_subplot(fig1rows, fig1cols, 3)
-        ax1.set_title('Drone vel (m/s)', fontsize=16)
-        ax1.plot(t_arr, dr_v_hist[:, 0], 'k', label="vx")
-        ax1.plot(t_arr, dr_v_hist[:, 1], 'b', label="vy")
+        ax1.set_title("Drone vel (m/s)", fontsize=16)
+        ax1.plot(t_arr, dr_v_hist[:, 0], "k", label="vx")
+        ax1.plot(t_arr, dr_v_hist[:, 1], "b", label="vy")
         ax1.grid(True)
         ax1.legend()
         ax1 = fig2.add_subplot(fig1rows, fig1cols, 4)
-        ax1.set_title('P command (m/s)', fontsize=16)
-        ax1.plot(t_arr, p_cmd_hist[:, 0], 'k', label="x")
-        ax1.plot(t_arr, p_cmd_hist[:, 1], 'b', label="y")
+        ax1.set_title("P command (m/s)", fontsize=16)
+        ax1.plot(t_arr, p_cmd_hist[:, 0], "k", label="x")
+        ax1.plot(t_arr, p_cmd_hist[:, 1], "b", label="y")
         ax1.grid(True)
         ax1.legend()
         ax1 = fig2.add_subplot(fig1rows, fig1cols, 5)
-        ax1.set_title('I command (m/s)', fontsize=16)
-        ax1.plot(t_arr, i_cmd_hist[:, 0], 'k', label="x")
-        ax1.plot(t_arr, i_cmd_hist[:, 1], 'b', label="y")
+        ax1.set_title("I command (m/s)", fontsize=16)
+        ax1.plot(t_arr, i_cmd_hist[:, 0], "k", label="x")
+        ax1.plot(t_arr, i_cmd_hist[:, 1], "b", label="y")
         ax1.grid(True)
         ax1.legend()
         plt.show()
+    if path_type == "obstacle":
+        fig2 = plt.figure()
+        ax1 = fig2.add_subplot(1, 1, 1)
+        dx = 0
+        dy = 1
+        ax1.set_xlabel(f"- State {dx} +")
+        ax1.set_ylabel(f"- State {dy} +")
+        ax1.grid(True)
+        for ID in range(planner.tree.size):
+            x_seq = np.array(planner.tree.x_seq[ID])
+            if ID in planner.node_seq:
+                ax1.plot((x_seq[:, dx]), (x_seq[:, dy]), color="r", zorder=2)
+            else:
+                ax1.plot((x_seq[:, dx]), (x_seq[:, dy]), color="0.75", zorder=1)
+        ax1.scatter(
+            planner.tree.state[0, dx],
+            planner.tree.state[0, dy],
+            color="b",
+            s=48,
+            label="Start",
+        )
+        ax1.scatter(
+            planner.tree.state[planner.node_seq[-1], dx],
+            planner.tree.state[planner.node_seq[-1], dy],
+            color="c",
+            s=48,
+            label="sequence",
+        )
+        ax1.scatter(planner.goal[dx], planner.goal[dy], color="g", s=48, label="Goal")
+        ax1.legend()
+        for ob in obs:
+            ax1.add_patch(
+                plt.Circle((ob[0], ob[1]), radius=ob[2], fc="r", label="Obstacle")
+            )
 
     # Figure for animation
     fig6 = plt.figure()
-    fig6.suptitle('Evolution')
+    fig6.suptitle("Evolution")
     ax6 = fig6.add_subplot(1, 1, 1)
-    ax6.set_xlabel('X (m)')
-    ax6.set_ylabel('Y (m)')
-    ax6.set_aspect('equal', 'datalim')
+    ax6.set_xlabel("X (m)")
+    ax6.set_ylabel("Y (m)")
+    ax6.set_aspect("equal", "datalim")
     ax6.grid(True)
 
     # Points and lines for representing positions and headings
     pthick = 100
     lthick = 2
     llen = 2.5
-    p = ax6.scatter(q_history[0, 0], q_history[0, 1], color='k', s=pthick, label='simulated boat')
-    h = ax6.plot([q_history[0, 0], q_history[0, 0] + llen*np.cos(q_history[0, 2])],
-                 [q_history[0, 1], q_history[0, 1] + llen*np.sin(q_history[0, 2])], color='k', linewidth=lthick)
-    pref = ax6.scatter(dr_history[0, 0], dr_history[0, 1], color='b', s=pthick, label='drone')
-    href = ax6.plot([dr_history[0, 0], dr_history[0, 0] - 0.8*llen*u_world_history[0, 0]],
-                    [dr_history[0, 1], dr_history[0, 1] - 0.8*llen*u_world_history[0, 1]], color='r', linewidth=lthick)
-    pact = ax6.scatter(bt_history[0, 0], bt_history[0, 1], color='c', s=pthick, label='boat data')
+    rope = np.array(
+        [
+            dr_history[:, 0] - q_history[:, 0],
+            dr_history[:, 1] - q_history[:, 1],
+        ]
+    )
+    rope = rope * dynamics.proj_le / np.linalg.norm(rope)
+    p = ax6.scatter(
+        q_history[0, 0], q_history[0, 1], color="k", s=pthick, label="simulated boat"
+    )
+    h = ax6.plot(
+        [q_history[0, 0], q_history[0, 0] + llen * np.cos(q_history[0, 2])],
+        [q_history[0, 1], q_history[0, 1] + llen * np.sin(q_history[0, 2])],
+        color="k",
+        linewidth=lthick,
+    )
+    pref = ax6.scatter(
+        dr_history[0, 0], dr_history[0, 1], color="b", s=pthick, label="drone"
+    )
+    href = ax6.plot(
+        [dr_history[0, 0], dr_history[0, 0] + rope[0, 0]],
+        [dr_history[0, 1], dr_history[0, 1] + rope[0, 1]],
+        color="r",
+        linewidth=lthick,
+    )
+    pact = ax6.scatter(
+        bt_history[0, 0], bt_history[0, 1], color="c", s=pthick, label="boat data"
+    )
 
-    # Plot entirety of actual trajectory
+    # Matplotlib Animation Parameters
+    framerate = 20  # fps
+    speedup = 100  # kinda makes the playback a little faster
+    store_data = False  # should data be stored into a .mat?
+    outline_path = True  # show path outline on animation?
+
+    # Plot entirety of actual obstacle
     if outline_path:
-        ax6.plot(q_history[:, 0], q_history[:, 1], 'k--',
-                 dr_history[:, 0], dr_history[:, 1], 'g--',
-                 bt_history[:, 0], bt_history[:, 1], 'm--')
+        ax6.plot(
+            q_history[:, 0],
+            q_history[:, 1],
+            "k--",
+            dr_history[:, 0],
+            dr_history[:, 1],
+            "g--",
+            bt_history[:, 0],
+            bt_history[:, 1],
+            "m--",
+        )
 
     # Function for updating the animation frame
 
@@ -413,14 +759,22 @@ if __name__ == "__main__":
         i = ii[0]  # don't ask...
 
         if np.isclose(t_arr[i], np.around(t_arr[i], 1)):
-            fig6.suptitle('Evolution (Time: {})'.format(t_arr[i]), fontsize=24)
+            fig6.suptitle(f"Evolution (Time: {t_arr[i]})", fontsize=24)
 
         p.set_offsets((q_history[i, 0], q_history[i, 1]))
-        h[0].set_data([q_history[i, 0], q_history[i, 0] + llen*np.cos(q_history[i, 2])],
-                      [q_history[i, 1], q_history[i, 1] + llen*np.sin(q_history[i, 2])])
+        h[0].set_data(
+            [q_history[i, 0], q_history[i, 0] + llen * np.cos(q_history[i, 2])],
+            [q_history[i, 1], q_history[i, 1] + llen * np.sin(q_history[i, 2])],
+        )
         pref.set_offsets((dr_history[i, 0], dr_history[i, 1]))
-        href[0].set_data([dr_history[i, 0], dr_history[i, 0] - 0.8*llen*u_world_history[i, 0]],
-                         [dr_history[i, 1], dr_history[i, 1] - 0.8*llen*u_world_history[i, 1]])
+        href[0].set_data(
+            [dr_history[i, 0], dr_history[i, 0] + rope[:, 0]],
+            [dr_history[i, 1], dr_history[i, 1] + rope[:, 1]],
+        )
+        href[0].set_data(
+            [dr_history[i, 0], dr_history[i, 0] - 0.8 * llen * u_world_history[i, 0]],
+            [dr_history[i, 1], dr_history[i, 1] - 0.8 * llen * u_world_history[i, 1]],
+        )
         pact.set_offsets((bt_history[i, 0], bt_history[i, 1]))
 
         ii[0] += int(1 / (dt * framerate))
@@ -432,57 +786,68 @@ if __name__ == "__main__":
             return [p, h, pref, href, pact]
 
     # Run animation
-    ani = animation.FuncAnimation(
-        fig6, func=update_ani, interval=dt*1000/speedup)
+    ani = animation.FuncAnimation(fig6, func=update_ani, interval=dt * 1000 / speedup)
     plt.legend()
     plt.show()
 
-#    # Store data
+    #    # Store data
     if store_data:
         from scipy.io import savemat
-        filename = 'data_{}_{}s'.format(path_type, T)
-        data = {'time': t_arr,
-                'north': q_history[:, 0],
-                'east': q_history[:, 1],
-                'heading': q_history[:, 2],
-                'surge': q_history[:, 3],
-                'sway': q_history[:, 4],
-                'yawrate': q_history[:, 5],
-                'north_des': dr_history[:, 0],
-                'east_des': dr_history[:, 1],
-                'heading_des': dr_history[:, 2],
-                'surge_des': dr_history[:, 3],
-                'sway_des': dr_history[:, 4],
-                'yawrate_des': dr_history[:, 5],
-                'surge_force': u_history[:, 0],
-                'sway_force': u_history[:, 1],
-                'yaw_torque': u_history[:, 2],
-                }
-        savemat(filename, data)
-        print('Data saved!\n')
 
-    plt.rcParams['text.usetex'] = True
-    plt.rcParams.update({'font.size': 13})
+        filename = f"data_{path_type}_{T}s"
+        data = {
+            "time": t_arr,
+            "north": q_history[:, 0],
+            "east": q_history[:, 1],
+            "heading": q_history[:, 2],
+            "surge": q_history[:, 3],
+            "sway": q_history[:, 4],
+            "yawrate": q_history[:, 5],
+            "north_des": dr_history[:, 0],
+            "east_des": dr_history[:, 1],
+            "heading_des": dr_history[:, 2],
+            "surge_des": dr_history[:, 3],
+            "sway_des": dr_history[:, 4],
+            "yawrate_des": dr_history[:, 5],
+            "surge_force": u_history[:, 0],
+            "sway_force": u_history[:, 1],
+            "yaw_torque": u_history[:, 2],
+        }
+        savemat(filename, data)
+        print("Data saved!\n")
+
+    plt.style.use("default")
+    plt.rcParams.update(
+        {
+            "text.usetex": True,
+            "font.family": "sans-serif",
+            "font.sans-serif": ["Helvetica"],
+        }
+    )
+    plt.rcParams.update({"font.size": 18})
+
     fig2 = plt.figure()
     ax2 = fig2.add_subplot(1, 1, 1)
-    ax2.plot(q_history[:, 0], q_history[:, 1], '--k', label='Boat Traj.')
-    ax2.plot(q_history[0,0],q_history[0,1], 'ok', label='Boat Start Point')
-    #ax2.plot(q_history[-1,0],q_history[-1,1], 'sk', label='Boat End Point')
-    ax2.plot(dr_history[:,0],dr_history[:,1], '--b', label='Drone Traj.')
-    ax2.plot(dr_history[0,0],dr_history[0,1], 'ob', label='Drone Start Point')
-    #ax2.plot(dr_history[-1,0],dr_history[-1,1], 'sb', label='drone final position')
-    ax2.set_xlabel('$x_I$ (m)')
-    ax2.set_ylabel('$y_I$ (m)')
+    ax2.plot(q_history[:, 0], q_history[:, 1], "--k", label="Boat Traj.")
+    ax2.plot(q_history[0, 0], q_history[0, 1], "ok", label="Boat Start Point")
+    # ax2.plot(q_history[-1,0],q_history[-1,1], 'sk', label='Boat End Point')
+    ax2.plot(dr_history[:, 0], dr_history[:, 1], "--b", label="Drone Traj.")
+    ax2.plot(dr_history[0, 0], dr_history[0, 1], "ob", label="Drone Start Point")
+    # ax2.plot(dr_history[-1,0],dr_history[-1,1], 'sb', label='drone final position')
+    ax2.set_xlabel("$x_I$ (m)")
+    ax2.set_ylabel("$y_I$ (m)")
     ax2.grid(True)
     plt.legend()
     plt.show()
     fig3 = plt.figure()
     ax3 = fig3.add_subplot(1, 1, 1)
-    ax3.plot(q_history[:,0],q_history[:,1], '--k', label='Boat Traj. in Sim.')
-    ax3.plot(bt_history[:,0],bt_history[:,1], '-r', label='Boat Traj. in Exp.')
-    ax3.plot(q_history[0,0],q_history[0,1], 'ok', label='Start Point (Sim. and Exp.)')
-    ax3.set_xlabel('$x_I$ (m)')
-    ax3.set_ylabel('$y_I$ (m)')
+    ax3.plot(q_history[:, 0], q_history[:, 1], "--k", label="Boat Traj. in Sim.")
+    ax3.plot(bt_history[:, 0], bt_history[:, 1], "-r", label="Boat Traj. in Exp.")
+    ax3.plot(
+        q_history[0, 0], q_history[0, 1], "ok", label="Start Point (Sim. and Exp.)"
+    )
+    ax3.set_xlabel("$x_I$ (m)")
+    ax3.set_ylabel("$y_I$ (m)")
     ax3.grid(True)
     plt.legend()
     plt.show()
