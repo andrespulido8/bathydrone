@@ -1,14 +1,13 @@
-# LAST UPDATE: Nicholas Sardinia, Febuary 20 2023
+#!/usr/bin/env python3
 """
-Updated algorithm to generate waypoints for convex polygons (semi-functional)
+Updated algorithm to generate waypoints for convex polygons 
 """
 
-#!/usr/bin/env python3
 import matplotlib.pyplot as plt
 import numpy as np
 
-# Define the boat hardware
 class HardwareSpecs:
+    """ Define the boat hardware"""
     # accounts for radius of curvature and side-scan sonar geometry
     def __init__(self, D, alpha_2):
         self.rho = D*np.tan(alpha_2)
@@ -16,12 +15,11 @@ class HardwareSpecs:
         # D - estimated depth of water
         # alpha_2 = Measured angle related to coverage of side-scan sonar
 
-"""
-Generates path, starting from lower-left corner. 
-# Lawnmower lines for full convex coveragae.
-# Returns path as a series of grid points from bottom left to top right
-"""
 class pathPlanner:
+    """ Generates path, starting from lower-left corner. 
+    Lawnmower lines for full convex coveragae.
+    Returns path as a series of grid points from bottom left to top right
+    """
     def __init__(self, pointsX, pointsY, rho):
         self.pointsX = pointsX
         self.pointsY = pointsY
@@ -31,12 +29,6 @@ class pathPlanner:
         self.pathX = []
         self.pathY = []
 
-
-        pathDirection = 0
-        UP = 1
-        DOWN = -1
-        
-        
         #find maximum X
         maxXDex = 0
         maxX = self.pointsX[0]
@@ -113,101 +105,11 @@ class pathPlanner:
                     self.pathX.append(self.pathPointsX[i])
                     self.pathY.append(self.pathPointsY[i])
         
-                    
-        
-    
-                    
-        
-            
-
-
-
-#path_planner improvements
-class pathPlannerMarch:
-    def __init__(self, pointsX, pointsY, rho):
-        self.pointsX = pointsX
-        self.pointsY = pointsY
-        self.rho = rho
-        self.pathX = []
-        self.pathY = []
-
-        pathDirection = 0
-        UP = 1
-        DOWN = -1
-
-        minXDex = 0
-        minX = pointsX[0]
-        for i in range(0, len(pointsX)):
-            if pointsX[i] < minX:
-                minX = pointsX[i]
-                minXDex = i
-
-        self.pathX.append(pointsX[minXDex])
-        self.pathY.append(pointsY[minXDex])
-
-        #First "Iteration Righward" = pointsX[minXDex] + rho
-        firstIter = pointsX[minXDex] + rho
-
-        xLeftBot = 0
-        xRightBot = 0
-        xLeftTop = 0
-        xRightTop = 0
-
-        #Vertical line
-        if (pointsX[0] == pointsX[1]):
-            #there is a vertical line
-            interpTop = pointsY[1]
-        else:
-            for i in range(0, len(pointsX)):
-                if pointsY[i] >= self.pathY[0] and pointsX[i] <= firstIter:
-                    xLeftTop = i
-                if pointsY[i] >= self.pathY[0] and pointsX[i] >= firstIter:
-                    xRightTop = i
-            interpTop = self.pathY[0] + (pointsY[xRightTop]-pointsY[xLeftTop])/(abs(pointsX[xLeftTop]-pointsX[xRightTop]))*(rho)
-        #X-2, because in a closed polygon, the first point will always equal the last point
-        if (pointsX[0] == pointsX[len(pointsX)-2]):
-            #there is a vertical line below our point
-            interpBot = pointsY[len(pointsX)-2]
-        else:
-            for i in range(0, len(pointsX)):
-                if pointsY[i] <= self.pathY[0] and pointsX[i] <= firstIter:
-                    xLeftBot = i
-                if pointsY[i] <= self.pathY[0] and pointsX[i] >= firstIter:
-                        xRightBot = i
-                interpBot = self.pathY[0] - (pointsY[xRightBot]-pointsY[xLeftBot])/(pointsX[xLeftBot]-pointsX[xRightBot])*(rho)
-        
-        #Choose path direction and place first waypoint
-        if (self.pathY[0] - interpBot >= interpTop-self.pathY[0]):
-            pathDirection = -1
-            self.pathX.append(firstIter)
-            self.pathY.append(interpBot)
-        else:
-            pathDirection = 1
-            self.pathX.append(firstIter)
-            self.pathY.append(interpTop)
-
-        #Sweep the shape
-
-        #find max point in x(stopping criterion)
-        maxX = pointsX[0]
-        for i in range(0, len(pointsX)):
-            if pointsX[i] > maxX:
-                maxX = pointsX[i]
-
-        currDex = 0
-        currX = self.pathX[0]
-        currY = self.pathY[0]
-
-        #Generates Waypoints
-        while True:
-            currDex = currDex + 1
-            if maxX < pointsX[currDex] + rho:
-                break
-            
                 
-#Simple optimal sweep direction is parallel to the minimum width direction of the convex polygon
-#This minimizes the number of turns taken by the path
 def findBestSweepDirection(xPoints, yPoints): 
+    """ Simple optimal sweep direction is parallel to the minimum width direction of the convex polygon
+    This minimizes the number of turns taken by the path
+    """
     #find optimal matrix direction 
     xRot = []
     yRot = []
@@ -250,7 +152,7 @@ def plotGrid(xPoints, yPoints):
 
     plt.grid()
     plt.plot(xPoints, yPoints, marker='o', color='red')
-    plt.axis('square')
+    #plt.axis('square')
     plt.show()
 
 def plotPoints(xPoints, yPoints, bathyPath):
@@ -261,7 +163,7 @@ def plotPoints(xPoints, yPoints, bathyPath):
     plt.grid()
     myPlot = plt.plot(xPoints, yPoints, marker='o', color='red')
     plt.plot(bathyPath.pathPointsX, bathyPath.pathPointsY, marker='o', color='green', markersize='2', linestyle='none')
-    plt.axis('square')
+    #plt.axis('square')
     plt.show()
 
 def plotPath(xPoints, yPoints, bathyPath):
@@ -273,7 +175,7 @@ def plotPath(xPoints, yPoints, bathyPath):
     myPlot = plt.plot(xPoints, yPoints, marker='o', color='red')
     #plt.plot(bathyPath.pathPointsX, bathyPath.pathPointsY, marker='o', color='green', markersize='2', linestyle='none')
     plt.plot(bathyPath.pathX, bathyPath.pathY, marker='o', color='green', markersize='2')
-    plt.axis('square')
+    #plt.axis('square')
     plt.show()
 
 def main():
@@ -299,8 +201,6 @@ def main():
     plotPoints(xRot, yRot, bathyPath)
     plotPath(xRot, yRot, bathyPath)
     
-    
-
     return 0
 
 
