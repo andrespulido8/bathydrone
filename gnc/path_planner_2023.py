@@ -80,12 +80,19 @@ class pathPlanner:
 
             steppingDistance = abs(currHorizontalPos - maxHorizontalPos)
             steps = 0
+            
             while abs(steps * stepover) < steppingDistance:
                 currVerticalPos = self.pointsY[i] + slope * (currHorizontalPos-self.pointsX[i])
                 if currHorizontalPos <= maxX and currHorizontalPos >= minX:
                     if currVerticalPos <= maxY and currVerticalPos >= minY:
-                        self.pathPointsX.append(currHorizontalPos)
-                        self.pathPointsY.append(currVerticalPos)
+                        if stepover >= 0:
+                           if currHorizontalPos >= self.pointsX[i] and currHorizontalPos <= self.pointsX[i+1]:
+                            self.pathPointsX.append(currHorizontalPos)
+                            self.pathPointsY.append(currVerticalPos)
+                        else:
+                            if currHorizontalPos <= self.pointsX[i] and currHorizontalPos >= self.pointsX[i+1]:
+                                self.pathPointsX.append(currHorizontalPos)
+                                self.pathPointsY.append(currVerticalPos)
                 currHorizontalPos = currHorizontalPos + stepover
                 steps = steps + 1
             lastHorizontalPos = currHorizontalPos-stepover
@@ -96,6 +103,7 @@ class pathPlanner:
 
         #Now, draw lines between any two points at the same horizontal position.
         #Begin from minimum x
+        """
         roundedPathX = np.around(self.pathPointsX, decimals=1)
         j = 0
         while j < maxX:
@@ -104,6 +112,83 @@ class pathPlanner:
                 if roundedPathX[i] == np.round(j, 1):
                     self.pathX.append(self.pathPointsX[i])
                     self.pathY.append(self.pathPointsY[i])
+                    """
+        #Look ahead for rightward connections
+        roundedPathX = np.around(self.pathPointsX, decimals=1)
+        j = minX
+        tmpFirst = -1
+        tmpSecond = -1
+        tmpThird = -1
+        tmpFourth = -1
+        topLeft = 0
+        botLeft = 0
+        topRight = 0
+        alt = 1
+        radius = stepover * 0.5
+        while j <= maxX- 2*stepover:
+            j = j + stepover
+            for i in range(0, len(self.pathPointsX)):
+                #Left
+                if tmpFirst == -1:
+                    if roundedPathX[i] == np.round(j, 1):
+                        tmpFirst = i
+                #Left
+                if tmpSecond == -1:
+                    if roundedPathX[i] == np.round(j, 1) and i != tmpFirst:
+                        tmpSecond = i
+                #Right
+                if tmpThird == -1:
+                    if roundedPathX[i] == np.round(j+stepover, 1):
+                        tmpThird = i
+                #Right
+                if tmpFourth == -1:
+                    if roundedPathX[i] == np.round(j+stepover, 1) and i != tmpThird:
+                        tmpFourth = i
+
+            #Sort to bottom left -> top left -> top right orientation.
+            #Find bottom and top left
+            if self.pathPointsY[tmpFirst] > self.pathPointsY[tmpSecond]:
+                topLeft = tmpFirst
+                botLeft = tmpSecond
+            else:
+                topLeft = tmpSecond
+                botLeft = tmpFirst
+            #Find bottom and top right
+            if self.pathPointsY[tmpThird] > self.pathPointsY[tmpFourth]:
+                topRight = tmpThird
+                botRight = tmpFourth
+            else:
+                topRight = tmpFourth
+                botRight = tmpThird
+
+            #Add to path in order
+            #Alternate ordering each iteration
+            if alt == -1:
+                self.pathX.append(self.pathPointsX[botLeft])
+                self.pathY.append(self.pathPointsY[botLeft]+2*radius)
+                self.pathX.append(self.pathPointsX[botRight])
+                self.pathY.append(self.pathPointsY[botRight]+2*radius)
+                self.pathX.append(self.pathPointsX[topRight])
+                self.pathY.append(self.pathPointsY[topRight]-2*radius)
+                alt = 1
+            else:
+                #Bottom left
+                self.pathX.append(self.pathPointsX[botLeft])
+                self.pathY.append(self.pathPointsY[botLeft]+2*radius)
+                #Top left
+                self.pathX.append(self.pathPointsX[topLeft])
+                self.pathY.append(self.pathPointsY[topLeft]-2*radius)
+                #Top right
+                self.pathX.append(self.pathPointsX[topRight])
+                self.pathY.append(self.pathPointsY[topRight]-2*radius)
+                alt = -1
+
+            tmpFirst = -1
+            tmpSecond = -1
+            tmpThird = -1
+            tmpFourth = -1
+            #Loop restarts looking for bottom left of the next index
+
         
                 
 def findBestSweepDirection(xPoints, yPoints): 
@@ -180,8 +265,8 @@ def plotPath(xPoints, yPoints, bathyPath):
 
 def main():
     #input closed area as points. 
-    xPointsPoly = [0.0, 0.0, 100.0, 90, 0.0]
-    yPointsPoly = [0.0, 100.0, 100.0, 0.0, 0.0]
+    xPointsPoly = [0.0, 70.0, 80.0, 80.0, 70.0, 40.0, 0.0]
+    yPointsPoly = [80.0, 140.0, 90.0, 30.0, 10.0, 0.0, 80.0]
 
     #Square
     xPointsSq = [0.0, 0.0, 100.0, 100.0, 0.0]
@@ -192,7 +277,7 @@ def main():
     yPointsOct = [0.0, 60.0, 100.0,  100.0, 70.0, -10.0, -50.0, -50.0, 0.0]
 
     
-    xRot, yRot = xPointsOct, yPointsOct
+    xRot, yRot = findBestSweepDirection(xPointsPoly, yPointsPoly)
 
     plotGrid(xRot, yRot) 
     #testGrid = plotGrid(xRot, yRot)
