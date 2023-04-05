@@ -5,6 +5,7 @@ Updated algorithm to generate waypoints for convex polygons
 
 import matplotlib.pyplot as plt
 import numpy as np
+import math
 
 class HardwareSpecs:
     """ Define the boat hardware"""
@@ -99,20 +100,7 @@ class pathPlanner:
             if stepoverReset == 1:
                 stepover = stepover * (-1)
         
-            
 
-        #Now, draw lines between any two points at the same horizontal position.
-        #Begin from minimum x
-        """
-        roundedPathX = np.around(self.pathPointsX, decimals=1)
-        j = 0
-        while j < maxX:
-            j = j + stepover
-            for i in range(0, len(self.pathPointsX)):
-                if roundedPathX[i] == np.round(j, 1):
-                    self.pathX.append(self.pathPointsX[i])
-                    self.pathY.append(self.pathPointsY[i])
-                    """
         #Look ahead for rightward connections
         roundedPathX = np.around(self.pathPointsX, decimals=1)
         j = minX
@@ -125,7 +113,8 @@ class pathPlanner:
         topRight = 0
         alt = 1
         radius = stepover * 0.5
-        while j <= maxX- 2*stepover:
+        cStep = .0625 * stepover
+        while j <= maxX - 2*stepover:
             j = j + stepover
             for i in range(0, len(self.pathPointsX)):
                 #Left
@@ -164,23 +153,44 @@ class pathPlanner:
             #Add to path in order
             #Alternate ordering each iteration
             if alt == -1:
-                self.pathX.append(self.pathPointsX[botLeft])
-                self.pathY.append(self.pathPointsY[botLeft]+2*radius)
-                self.pathX.append(self.pathPointsX[botRight])
-                self.pathY.append(self.pathPointsY[botRight]+2*radius)
-                self.pathX.append(self.pathPointsX[topRight])
-                self.pathY.append(self.pathPointsY[topRight]-2*radius)
+                if self.pathPointsY[botLeft] >= self.pathPointsY[botRight]:
+                    #Draw radius based on botLeft
+                    currX = self.pathPointsX[botLeft]
+                    currY = self.pathPointsY[botLeft]+2*radius
+                    angle = math.pi
+                    for i in range(16):
+                        self.pathX.append(currX+radius+radius*math.cos(angle))
+                        self.pathY.append(currY+radius*math.sin(angle))
+                        angle = angle + math.pi/16
+                else:
+                    #Draw from botRight
+                    currX = self.pathPointsX[botLeft]
+                    currY = self.pathPointsY[botRight]+2*radius
+                    angle = math.pi
+                    for i in range(16):
+                        self.pathX.append(currX+radius+radius*math.cos(angle))
+                        self.pathY.append(currY+radius*math.sin(angle))
+                        angle = angle + math.pi/16
+                #self.pathX.append(self.pathPointsX[topRight])
+                #self.pathY.append(self.pathPointsY[topRight]-radius)
                 alt = 1
             else:
-                #Bottom left
-                self.pathX.append(self.pathPointsX[botLeft])
-                self.pathY.append(self.pathPointsY[botLeft]+2*radius)
-                #Top left
-                self.pathX.append(self.pathPointsX[topLeft])
-                self.pathY.append(self.pathPointsY[topLeft]-2*radius)
-                #Top right
-                self.pathX.append(self.pathPointsX[topRight])
-                self.pathY.append(self.pathPointsY[topRight]-2*radius)
+                if self.pathPointsY[topLeft] <= self.pathPointsY[topRight]:
+                    currX = self.pathPointsX[topLeft]
+                    currY = self.pathPointsY[topLeft]-2*radius
+                    angle = math.pi
+                    for i in range(17):
+                        self.pathX.append(currX+radius+radius*math.cos(angle))
+                        self.pathY.append(currY+radius*math.sin(angle))
+                        angle = angle - math.pi/16
+                else:
+                    currX = self.pathPointsX[topLeft]
+                    currY = self.pathPointsY[topRight]-2*radius
+                    angle = math.pi
+                    for i in range(17):
+                        self.pathX.append(currX+radius+radius*math.cos(angle))
+                        self.pathY.append(currY+radius*math.sin(angle))
+                        angle = angle - math.pi/16
                 alt = -1
 
             tmpFirst = -1
@@ -237,7 +247,7 @@ def plotGrid(xPoints, yPoints):
 
     plt.grid()
     plt.plot(xPoints, yPoints, marker='o', color='red')
-    #plt.axis('square')
+    plt.axis('square')
     plt.show()
 
 def plotPoints(xPoints, yPoints, bathyPath):
@@ -248,7 +258,7 @@ def plotPoints(xPoints, yPoints, bathyPath):
     plt.grid()
     myPlot = plt.plot(xPoints, yPoints, marker='o', color='red')
     plt.plot(bathyPath.pathPointsX, bathyPath.pathPointsY, marker='o', color='green', markersize='2', linestyle='none')
-    #plt.axis('square')
+    plt.axis('square')
     plt.show()
 
 def plotPath(xPoints, yPoints, bathyPath):
@@ -259,8 +269,8 @@ def plotPath(xPoints, yPoints, bathyPath):
     plt.grid()
     myPlot = plt.plot(xPoints, yPoints, marker='o', color='red')
     #plt.plot(bathyPath.pathPointsX, bathyPath.pathPointsY, marker='o', color='green', markersize='2', linestyle='none')
-    plt.plot(bathyPath.pathX, bathyPath.pathY, marker='o', color='green', markersize='2')
-    #plt.axis('square')
+    plt.plot(bathyPath.pathX, bathyPath.pathY, color='green', markersize='2')
+    plt.axis('square')
     plt.show()
 
 def main():
@@ -277,7 +287,7 @@ def main():
     yPointsOct = [0.0, 60.0, 100.0,  100.0, 70.0, -10.0, -50.0, -50.0, 0.0]
 
     
-    xRot, yRot = findBestSweepDirection(xPointsPoly, yPointsPoly)
+    xRot, yRot = findBestSweepDirection(xPointsOct, yPointsOct)
 
     plotGrid(xRot, yRot) 
     #testGrid = plotGrid(xRot, yRot)
