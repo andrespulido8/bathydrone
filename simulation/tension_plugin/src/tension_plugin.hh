@@ -10,10 +10,10 @@
 #include <vector>
 #include "geometry_msgs/Vector3.h"
 
-//#include <gazebo/common/CommonTypes.hh>
-//#include <gazebo/common/Plugin.hh>
-//#include <gazebo/common/Time.hh>
-//#include <gazebo/physics/physics.hh>
+#include <gazebo/common/CommonTypes.hh>
+#include <gazebo/common/Plugin.hh>
+#include <gazebo/common/Time.hh>
+#include <gazebo/physics/physics.hh>
 
 //#include <sdf/sdf.hh>
 
