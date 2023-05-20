@@ -88,12 +88,16 @@ def draw_points(img, points):
 def display_image(img):
     '''
     Displays the input image, then waits for the
-    user to press \'q\'.
+    user to press any key.
     '''
     cv2.namedWindow('img', cv2.WINDOW_KEEPRATIO)
     cv2.imshow('img', img)
     cv2.resizeWindow('img', 2000, 2000)
-    cv2.waitKey(-1)
+    while cv2.getWindowProperty('img', cv2.WND_PROP_VISIBLE) >= 1:
+        key = cv2.waitKey(10)
+        if key != -1:
+            cv2.destroyWindow('img')
+            break
 
 def main():
     '''
