@@ -4,7 +4,8 @@ pipeline and conversion of water perimeter points into latitude and
 longitude coordinates.
 '''
 #!/usr/bin/env python3
-
+import numpy as np
+import math
 import csv  # for writing out coordinates to a CSV file
 import cv2  # OpenCV python library
 import grip # GRIP-generated pipeline (see grip.py)
@@ -70,6 +71,22 @@ def xy_to_latlong(latlong_bounds, xy_bounds, contour):
 
     return latlong_points
 
+
+def scale_contour(num_points, contour):
+    '''
+    Scales a contour down to the specified number of points.
+    '''
+    # how often to take another value from the input contour
+    step_size = int(math.ceil((len(contour)/num_points)))
+
+    # use slicing to take every n-th item
+    new_contour = contour[0::step_size]
+    if len(new_contour) < len(contour):
+        new_contour = np.append(new_contour, [contour[len(contour)-1]], axis=0)
+
+    return new_contour
+    #return np.ndarray(shape=(num_points, 1, 2), buffer=np.array(new_contour))
+
 def draw_contour(img, contour):
     '''
     Draws a contour on the input image.
@@ -103,7 +120,6 @@ def main():
     '''
     Main function to demonstrate OpenCV pipeline functionality.
     '''
-
 
     # Read in the test image of Newnans Lake.
     img = cv2.imread("Figures/newnans-lake-1.png")
@@ -161,7 +177,12 @@ def main():
     assert nnl_latlong
 
     output_file_name = 'newnans-lake-coords.csv'
-    print(f'Not collecting new lat/long points. Output will be sent to {output_file_name}')
+    print(f'Not collecting lat/long bounds. Output will be sent to {output_file_name}.')
+
+    num_latlong_points = int(input("Please enter the number of points you would like to output: "))
+    nnl_contour = scale_contour(num_latlong_points, nnl_contour)
+    print(f'resulting contour has {len(nnl_contour)} points.')
+
     latlong_output = xy_to_latlong(nnl_latlong, nnl_xy, nnl_contour)
 
     # Write lat/long coordinates to output CSV file.
