@@ -2,304 +2,359 @@
 """
 Updated algorithm to generate waypoints for convex polygons 
 """
-
 import matplotlib.pyplot as plt
+import geopandas as gpd
+import matplotlib.path as pth
 import numpy as np
 import math
+import csv
+import pandas as pd
+from scipy.spatial import ConvexHull
+from shapely.geometry import Polygon
+from shapely.prepared import prep
 
-class HardwareSpecs:
-    """ Define the boat hardware"""
-    # accounts for radius of curvature and side-scan sonar geometry
-    def __init__(self, D, alpha_2):
-        self.rho = D*np.tan(alpha_2)
-        # rho - radius that constrains the spacing between each
-        # D - estimated depth of water
-        # alpha_2 = Measured angle related to coverage of side-scan sonar
 
-class pathPlanner:
-    """ Generates path, starting from lower-left corner. 
-    Lawnmower lines for full convex coveragae.
-    Returns path as a series of grid points from bottom left to top right
-    """
-    def __init__(self, pointsX, pointsY, rho):
-        self.pointsX = pointsX
-        self.pointsY = pointsY
-        self.rho = rho
-        self.pathPointsX = []
-        self.pathPointsY = []
-        self.pathX = []
-        self.pathY = []
+def generatePath(polygonToPath, pathDist):
+    c1 = 0.9
+    c2 = 0.1
+    lc = 100000000
+    #optimization for path orientation.
+    #Tests angle in 10 degree increments. Returns all path lengths. 
+    bestPL = 100000000
+    minTurns = 10000000
+    currPL = 0
+    pathLengths = []
+    savedNumTurns = 10000
+    savedPL = 100000
+    
+    for testAngle in range(0, 180, 10):
+        polygonToPathRotated =  []      
 
-        #find maximum X
-        maxXDex = 0
-        maxX = self.pointsX[0]
-        for i in range(0, len(self.pointsX)):
-            if self.pointsX[i] > maxX:
-                maxX = self.pointsX[i]
-                maxXDex = i
-
-        minXDex = 0
-        minX = self.pointsX[0]
-        for i in range(0, len(self.pointsX)):
-            if self.pointsX[i] < minX:
-                minX = self.pointsX[i]
-                minXDex = i
+        #rotation matrix
+        transformAngle = [[np.cos(np.deg2rad(testAngle)), -np.sin(np.deg2rad(testAngle))], 
+                      [np.sin(np.deg2rad(testAngle)), np.cos(np.deg2rad(testAngle))]]
         
-        maxYDex = 0
-        maxY = self.pointsY[0]
-        for i in range(0, len(self.pointsY)):
-            if self.pointsY[i] > maxY:
-                maxY = self.pointsY[i]
-                maxYDex = i
-        
-        minYDex = 0
-        minY = self.pointsY[0]
-        for i in range(0, len(self.pointsY)):
-            if self.pointsY[i] < minY:
-                minY = self.pointsY[i]
-                minYDex = i
-         
+        #do the inverse rotation for each point in dome
+        for point in polygonToPath:
+                rotatedpoint = list((np.dot(transformAngle, point)) )
+                polygonToPathRotated.append(rotatedpoint)
 
-        #iterate through given lines, adding points at predetermined increments
-        #Rho determines the minimum turning radius of bathydrone, as such, it will serve as the path stepover.
-        stepover = rho 
-        lastHorizontalPos = self.pointsX[0]
-        for i in range(0, len(self.pointsX)-1):
-            #get line slope
-            currVerticalPos = self.pointsY[i]
-            if self.pointsX[i+1] - self.pointsX[i] == 0:
-                continue
-            slope = (self.pointsY[i+1] - self.pointsY[i])/(self.pointsX[i+1] - self.pointsX[i])
-            currHorizontalPos = lastHorizontalPos
-            maxHorizontalPos = self.pointsX[i+1]
+        geom = Polygon(polygonToPathRotated)
+        grid = partition(geom, pathDist)
+        path = []
+        manipulableGrid = list(grid)
+        emptyPath = 0
 
-            #Change stepover based on path direction
-            stepoverReset = 0
-            if self.pointsX[i] > self.pointsX[i+1]:
-                stepover = stepover * (-1)
-                stepoverReset = 1
+        if len(manipulableGrid) >= 2:
+            emptyPath = 0
+            #PATHING THE GRID
+            #Set direction marker
+            #DIR = 1, UP
+            dir = 1
 
-            steppingDistance = abs(currHorizontalPos - maxHorizontalPos)
-            steps = 0
+            #1. Start at the grid coordinate with minimum X
+            #Find minimum X position of the grid
+            xx, yy = manipulableGrid[0].exterior.coords.xy
+            minX = xx[0]
+            width = abs(xx[0] - xx[2])
             
-            while abs(steps * stepover) < steppingDistance:
-                currVerticalPos = self.pointsY[i] + slope * (currHorizontalPos-self.pointsX[i])
-                if currHorizontalPos <= maxX and currHorizontalPos >= minX:
-                    if currVerticalPos <= maxY and currVerticalPos >= minY:
-                        if stepover >= 0:
-                           if currHorizontalPos >= self.pointsX[i] and currHorizontalPos <= self.pointsX[i+1]:
-                            self.pathPointsX.append(currHorizontalPos)
-                            self.pathPointsY.append(currVerticalPos)
-                        else:
-                            if currHorizontalPos <= self.pointsX[i] and currHorizontalPos >= self.pointsX[i+1]:
-                                self.pathPointsX.append(currHorizontalPos)
-                                self.pathPointsY.append(currVerticalPos)
-                currHorizontalPos = currHorizontalPos + stepover
-                steps = steps + 1
-            lastHorizontalPos = currHorizontalPos-stepover
-            if stepoverReset == 1:
-                stepover = stepover * (-1)
-        
+            #2. get slice of all grid squares with this X.
+            #3. Choose what to do based on the details of the slice.
+            xtest, ytest = manipulableGrid[len(manipulableGrid)-1].exterior.coords.xy
+            maxX = xtest[0]
 
-        #Look ahead for rightward connections
-        roundedPathX = np.around(self.pathPointsX, decimals=1)
-        j = minX
-        tmpFirst = -1
-        tmpSecond = -1
-        tmpThird = -1
-        tmpFourth = -1
-        topLeft = 0
-        botLeft = 0
-        topRight = 0
-        alt = 1
-        radius = stepover * 0.5
-        cStep = .0625 * stepover
-        while j <= maxX - 2*stepover:
-            j = j + stepover
-            for i in range(0, len(self.pathPointsX)):
-                #Left
-                if tmpFirst == -1:
-                    if roundedPathX[i] == np.round(j, 1):
-                        tmpFirst = i
-                #Left
-                if tmpSecond == -1:
-                    if roundedPathX[i] == np.round(j, 1) and i != tmpFirst:
-                        tmpSecond = i
-                #Right
-                if tmpThird == -1:
-                    if roundedPathX[i] == np.round(j+stepover, 1):
-                        tmpThird = i
-                #Right
-                if tmpFourth == -1:
-                    if roundedPathX[i] == np.round(j+stepover, 1) and i != tmpThird:
-                        tmpFourth = i
 
-            #Sort to bottom left -> top left -> top right orientation.
-            #Find bottom and top left
-            if self.pathPointsY[tmpFirst] > self.pathPointsY[tmpSecond]:
-                topLeft = tmpFirst
-                botLeft = tmpSecond
-            else:
-                topLeft = tmpSecond
-                botLeft = tmpFirst
-            #Find bottom and top right
-            if self.pathPointsY[tmpThird] > self.pathPointsY[tmpFourth]:
-                topRight = tmpThird
-                botRight = tmpFourth
-            else:
-                topRight = tmpFourth
-                botRight = tmpThird
-
-            #Add to path in order
-            #Alternate ordering each iteration
-            if alt == -1:
-                if self.pathPointsY[botLeft] >= self.pathPointsY[botRight]:
-                    #Draw radius based on botLeft
-                    currX = self.pathPointsX[botLeft]
-                    currY = self.pathPointsY[botLeft]+2*radius
-                    angle = math.pi
-                    for i in range(16):
-                        self.pathX.append(currX+radius+radius*math.cos(angle))
-                        self.pathY.append(currY+radius*math.sin(angle))
-                        angle = angle + math.pi/16
-                else:
-                    #Draw from botRight
-                    currX = self.pathPointsX[botLeft]
-                    currY = self.pathPointsY[botRight]+2*radius
-                    angle = math.pi
-                    for i in range(16):
-                        self.pathX.append(currX+radius+radius*math.cos(angle))
-                        self.pathY.append(currY+radius*math.sin(angle))
-                        angle = angle + math.pi/16
-                #self.pathX.append(self.pathPointsX[topRight])
-                #self.pathY.append(self.pathPointsY[topRight]-radius)
-                alt = 1
-            else:
-                if self.pathPointsY[topLeft] <= self.pathPointsY[topRight]:
-                    currX = self.pathPointsX[topLeft]
-                    currY = self.pathPointsY[topLeft]-2*radius
-                    angle = math.pi
-                    for i in range(17):
-                        self.pathX.append(currX+radius+radius*math.cos(angle))
-                        self.pathY.append(currY+radius*math.sin(angle))
-                        angle = angle - math.pi/16
-                else:
-                    currX = self.pathPointsX[topLeft]
-                    currY = self.pathPointsY[topRight]-2*radius
-                    angle = math.pi
-                    for i in range(17):
-                        self.pathX.append(currX+radius+radius*math.cos(angle))
-                        self.pathY.append(currY+radius*math.sin(angle))
-                        angle = angle - math.pi/16
-                alt = -1
-
-            tmpFirst = -1
-            tmpSecond = -1
-            tmpThird = -1
-            tmpFourth = -1
-            #Loop restarts looking for bottom left of the next index
-
-        
+            numTurns = 0
+            currX = minX
+            currDex = 0
+            while (currX <= maxX):
+                slice = []
+                for i in range(len(manipulableGrid)):
+                    testX, testY = manipulableGrid[i].exterior.coords.xy
+                    if (testX[0] == currX):
+                        slice.append(manipulableGrid[i])
+                        currDex = i
                 
-def findBestSweepDirection(xPoints, yPoints): 
-    """ Simple optimal sweep direction is parallel to the minimum width direction of the convex polygon
-    This minimizes the number of turns taken by the path
-    """
-    #find optimal matrix direction 
-    xRot = []
-    yRot = []
-    tempPoints = []    
-    opAngleDist = max(xPoints)-min(xPoints)
-    opAngle = 0
-    for testAngle in range(1, 360):
-        #print(opAngle)
-        transformAngle = [[np.cos(np.deg2rad(testAngle)), -np.sin(np.deg2rad(testAngle))], [np.sin(np.deg2rad(testAngle)), np.cos(np.deg2rad(testAngle))]]
-        tempX = [] 
-        for p in range(0, len(xPoints)):
-            xyMat = [[xPoints[p]], [yPoints[p]]]
-            tempPoints.append(np.matmul(transformAngle, xyMat))
-        for p in range(0, len(xPoints)):
-            tempX.append(tempPoints[p][0])
-        if max(tempX)-min(tempX) < opAngleDist:
-            opAngleDist = max(tempX) - min(tempX)
-            opAngle = testAngle
-        tempPoints = []
-    #print(opAngle) 
+                if (len(slice) > 0):
+                    if (dir == 1):
+                        numTurns += 1
+                        xx, yy = slice[0].exterior.coords.xy
+                        firstPoint = []
+                        firstPoint.append((xx[0]+xx[2])/2)
+                        firstPoint.append((yy[0]+yy[2])/2)
+                        xx2, yy2 = slice[len(slice)-1].exterior.coords.xy
+                        endPoint = [] 
+                        endPoint.append((xx2[0]+xx2[2])/2)
+                        endPoint.append((yy2[0]+yy2[2])/2)
+                        path.append(firstPoint)
+                        path.append(endPoint)
+                    if (dir == -1):
+                        numTurns += 1
+                        xx, yy = slice[len(slice)-1].exterior.coords.xy
+                        firstPoint = []
+                        firstPoint.append((xx[0]+xx[2])/2)
+                        firstPoint.append((yy[0]+yy[2])/2)
+                        xx2, yy2 = slice[0].exterior.coords.xy
+                        endPoint = [] 
+                        endPoint.append((xx2[0]+xx2[2])/2)
+                        endPoint.append((yy2[0]+yy2[2])/2)
+                        path.append(firstPoint)
+                        path.append(endPoint)
+                if (currDex + 1 != len(manipulableGrid)):
+                    currDex = currDex + 1
+                    xDex, yDex = manipulableGrid[currDex].exterior.coords.xy
+                    currX = xDex[0]
+                    dir = dir * (-1)
+                else:
+                    currDex = currDex + 1
+                    currX = currX + width
+                    dir = dir * (-1)
 
-    #Now rotate the shape by the angle
-    finalTransform = [[np.cos(np.deg2rad(opAngle)), -np.sin(np.deg2rad(opAngle))], [np.sin(np.deg2rad(opAngle)), np.cos(np.deg2rad(opAngle))]]
-    tempPointsFinal = []
-    for i in range(0, len(xPoints)):
-         xyMatNew = [[xPoints[i]], [yPoints[i]]]
-         tempPointsFinal.append(np.matmul(finalTransform, xyMatNew))
-    for p in range(0, len(xPoints)):
-            xRot.append(tempPointsFinal[p][0])
-            yRot.append(tempPointsFinal[p][1])
-    #print(xRot) 
-    #print(yRot)
+                
+            #rotate the chosen path back to the real orientation
+            transformAngleRev = [[np.cos(np.deg2rad(-testAngle)), -np.sin(np.deg2rad(-testAngle))], 
+                        [np.sin(np.deg2rad(-testAngle)), np.cos(np.deg2rad(-testAngle))]]
+        
+            xPath1, yPath2 = zip(*path)
+        
+            rotatedPath = []
+            for point in path:
+                rotatedpoint = list((np.dot(transformAngleRev, point)) )
+                rotatedPath.append(rotatedpoint)
+
+            path = rotatedPath
+            totalLength = 0
+            xConv, yConv = zip(*path)
+            distTemp = 0
+            for j in range(len(xConv)-2):
+                distX = ((xConv[j])-(xConv[j+1]))*((xConv[j])-(xConv[j+1]))*69*69
+                distY = ((yConv[j])-(yConv[j+1]))*((yConv[j])-(yConv[j+1]))*54.6*54.6
+                distTemp += math.sqrt(distX + distY)
+            totalLength += distTemp
+            currPL = totalLength
+            currC = c1*currPL + c2*numTurns
+            pathLengths.append(totalLength)   
+
+            if lc > currC:
+                chosenPath = path
+                lc = currC
+                savedPL = currPL
+                savedNumTurns = numTurns
+            
+            if bestPL > currPL:
+                bestPL = currPL
+
+            if minTurns > numTurns:
+                minTurns = numTurns
+        else:
+            bestPL = 0
+            chosenPath = []
+            emptyPath = 1
+
+        
+    return chosenPath, bestPL, emptyPath
+
+#Grid the polygon
+def grid_bounds(geom, delta):
+    minx, miny, maxx, maxy = geom.bounds
+    nx = int((maxx - minx)/delta)
+    ny = int((maxy - miny)/delta)
+    gx, gy = np.linspace(minx,maxx,nx), np.linspace(miny,maxy,ny)
+    grid = []
+    for i in range(len(gx)-1):
+        for j in range(len(gy)-1):
+            poly_ij = Polygon([[gx[i],gy[j]],[gx[i],gy[j+1]],[gx[i+1],gy[j+1]],[gx[i+1],gy[j]]])
+            grid.append( poly_ij )
+    return grid
+
+#Define grid
+def partition(geom, delta):
+    prepared_geom = prep(geom)
+    gridFirst = list(filter(prepared_geom.intersects, grid_bounds(geom, delta)))
+    grid = list(filter(prepared_geom.covers, grid_bounds(geom, delta)))
+    return grid
     
-    return xRot, yRot
+#Find the convex hull of a polygon
+def listConvexHull(polyPoints):
+    cHull = ConvexHull(polyPoints)
+    listHull = []
+    for i in range(len(cHull.vertices)):
+        listHull.append(polyPoints[cHull.vertices[i]])
+    #print(listHull)
+    return listHull
+
+#Take a polygon, and export an inorder list of SL-concavities
+def concavityChecker(polyPoints, polyGeom):
+    #print("iteration")
     
-def plotGrid(xPoints, yPoints):
-    plt.title("Region of interest")
-    plt.xlabel("X")
-    plt.ylabel("Y")
+    conHullC = polyGeom.convex_hull.get_coordinates()
+    conHull = list(conHullC.itertuples(index=False, name=None))
 
-    plt.grid()
-    plt.plot(xPoints, yPoints, marker='o', color='red')
-    plt.axis('square')
-    plt.show()
+    concavities = [0]*len(polyPoints)
+    for i in range(len(polyPoints)):
+        if polyPoints[i] in conHull:
+            concavities[i] = 0
+        else:
+            #find bounding hull points
+            if i == 0:
+                j = len(polyPoints)-1
+            else:
+                j = i
+   
+            while (j >= 0):
+                j = j-1
+                if polyPoints[j] in conHull:
+                    b1 = polyPoints[j]
+                    break
+            j = i
+            if(i == (len(polyPoints)-1)):
+                j = 0
+            while (j < len(polyPoints)-1):
+                j = j + 1
+                if polyPoints[j] in conHull:
+                    b2 = polyPoints[j]
+                    break
+            #Find perpendicular distance from line b1->b2 to point polyPoints[i]
+            concavities[i] = abs((b1[0]-b2[0])*(b1[1]-polyPoints[i][1])-(b1[1]-b2[1])*(b1[0]-polyPoints[i][0]))/math.sqrt(math.pow(b1[0]-b2[0], 2)+math.pow(b1[1]-b2[1], 2))
+    return concavities
 
-def plotPoints(xPoints, yPoints, bathyPath):
-    plt.title("Waypoints Calculated")
-    plt.xlabel("X")
-    plt.ylabel("Y")
+#Resolve by splitting into 2 polygons
+#TODO improve optimization
+def resolveConvex(polyPoints, rIndex, polyPointsGeom, concavities):
+    #tunable constants for hueristic
+    ignoreRange = [rIndex + len(concavities) / 5.0, rIndex - len(concavities)/5.0]
+    sc = 0.1
+    sd = 1
 
-    plt.grid()
-    myPlot = plt.plot(xPoints, yPoints, marker='o', color='red')
-    plt.plot(bathyPath.pathPointsX, bathyPath.pathPointsY, marker='o', color='green', markersize='2', linestyle='none')
-    plt.axis('square')
-    plt.show()
+    #Find split points
+    bestScore = 0
+    bestDex = 0
+    for i in range(len(polyPoints)):
+        #Check unless in ignore range
+        if (i >= ignoreRange[0] or i <= ignoreRange[1]) and abs(sd*math.dist(polyPoints[rIndex], polyPoints[i])) != 0.0:
+            score = (1+sc*concavities[i])/(abs(sd*math.dist(polyPoints[rIndex], polyPoints[i])))
+            if score > bestScore:
+                bestScore = score
+                bestDex = i
+    poly1 = []
+    poly2 = polyPoints.copy()
+    if rIndex < bestDex:
+        j = rIndex
+        while j <= bestDex:
+            poly1.append(polyPoints[j])
+            if j != rIndex and j != bestDex:
+                poly2[j] = (-100000, -100000)
+            j = j + 1
+        while (-100000, -100000) in poly2:
+            poly2.remove((-100000, -100000))
+        poly1.append(polyPoints[rIndex])
 
-def plotPath(xPoints, yPoints, bathyPath):
-    plt.title("Bathydrone Boat Path")
-    plt.xlabel("X")
-    plt.ylabel("Y")
+    if rIndex > bestDex:
+        j = bestDex
+        while j <= rIndex:
+            poly1.append(polyPoints[j])
+            if j != rIndex and j != bestDex:
+                poly2[j] = (-100000, -100000)
+            j = j + 1
+        while (-100000, -100000) in poly2:
+            poly2.remove((-100000, -100000))
+        poly1.append(polyPoints[bestDex])
 
-    plt.grid()
-    myPlot = plt.plot(xPoints, yPoints, marker='o', color='red')
-    #plt.plot(bathyPath.pathPointsX, bathyPath.pathPointsY, marker='o', color='green', markersize='2', linestyle='none')
-    plt.plot(bathyPath.pathX, bathyPath.pathY, color='green', markersize='2')
-    plt.axis('square')
-    plt.show()
+    polygonUse1 = Polygon(poly1)
+    polygonUse2 = Polygon(poly2)
+    polyGeom1 = gpd.GeoSeries([polygonUse1])
+    polyGeom2 = gpd.GeoSeries([polygonUse2])
+
+    return poly1, poly2, polyGeom1, polyGeom2
+    
+#Take a polygon and apply apprimate convex decomposition.
+def makeConvexRec(polyPoints, tolerance, polyStore, polyPointsGeom): 
+    concavityList = concavityChecker(polyPoints, polyPointsGeom)
+    t = max(concavityList)
+    if t <= tolerance:
+        if polyPoints not in polyStore:
+            polyStore.append(polyPoints)
+        return polyPoints
+    else:
+        #Don't do this more than once per recursion
+        ps1, ps2, polyGeom1, polyGeom2 = resolveConvex(polyPoints, concavityList.index(max(concavityList)), polyPointsGeom, concavityList)
+        makeConvexRec(ps1, tolerance, polyStore, polyGeom1)
+        makeConvexRec(ps2, tolerance, polyStore, polyGeom2)
+
+def makeConvex(polyPoints, tolerance, polyPointsGeom):
+    ps = []
+    makeConvexRec(polyPoints, tolerance, ps, polyPointsGeom)
+    return ps
 
 def main():
-    #input closed area as points. 
-    xPointsPoly = [0.0, 70.0, 80.0, 80.0, 70.0, 40.0, 0.0]
-    yPointsPoly = [80.0, 140.0, 90.0, 30.0, 10.0, 0.0, 80.0]
+    #Get polygon from edge detection
+    xList = []
+    yList = []
+    columns = ["Latitude", "Longitude"]
+    df = pd.read_csv("lake-wauburg-coords.csv", usecols=columns)
+    yList = df.Latitude.values.tolist()
+    for i in range(len(yList)):
+        yList[i] = abs(yList[i])
+    xList = df.Longitude.values.tolist()
 
-    #Square
-    xPointsSq = [0.0, 0.0, 100.0, 100.0, 0.0]
-    yPointsSq = [0.0, 100.0, 100.0, 0.0, 0.0]
-
-    #Irregular Octagon
-    xPointsOct = [0.0, 0.0, 40.0, 80.0, 120.0, 120.0, 75.0, 30.0, 0.0]
-    yPointsOct = [0.0, 60.0, 100.0,  100.0, 70.0, -10.0, -50.0, -50.0, 0.0]
-
+    polygonToPath = list(zip(xList, yList))
+    xData, yData = zip(*polygonToPath)
     
-    xRot, yRot = findBestSweepDirection(xPointsOct, yPointsOct)
+    pathDist = abs((max(xData) - min(xData))/15)
+    path = generatePath(polygonToPath, pathDist)
+    geom = Polygon(polygonToPath)
+    
+    #APPROXIMATE CONVEX DECOMPOSITION
+    tol = pathDist
+    poly = gpd.GeoSeries([geom])
+    polyCoords = poly.get_coordinates()
+    polyCoordsList = list(polyCoords.itertuples(index=False, name=None))
+    pTest = makeConvex(polyCoordsList, tol*1.5, poly)
 
-    plotGrid(xRot, yRot) 
-    #testGrid = plotGrid(xRot, yRot)
-    boatSpecs = HardwareSpecs(1.25, 1.25) 
-    bathyPath = pathPlanner(xRot, yRot, boatSpecs.rho)
-    plotPoints(xRot, yRot, bathyPath)
-    plotPath(xRot, yRot, bathyPath)
+    #PLOTTING DECOMPOSED FIGURE
+    fig = plt.figure()
+    ax1 = fig.add_subplot(111)
+    ax1.axes.get_xaxis().set_visible(False)
+    ax1.axes.get_yaxis().set_visible(False)
+    testPathArr = []
+    pathDistOrig = pathDist
+    pathDist = pathDist/1.5
+    pathLengthTot=0
+
+    for i in range(len(pTest)):
+        x1, y1 = zip(*pTest[i])
+        #pathDist = abs((max(x1) - min(x1))/15)
+        #Maximum area heuristic
+        maxArea = (max(x1)-min(x1))*(max(y1)-min(y1))
+        if (maxArea > (5*pathDistOrig*pathDistOrig)):
+            genPath = generatePath(pTest[i], pathDist)
+            if (len(genPath[0]) > 2):
+                testPathArr.append(genPath[0])
+                pathLengthTot += genPath[1]
+
+           
+    #Dumb path connection
+    finalPath = []
+    for i in range(len(testPathArr)):
+         x1, y1 = zip(*testPathArr[i])
+         if (i == len(testPathArr)-1):
+            for j in range(len(testPathArr[i])):
+                finalPath.append(testPathArr[i][j])
+         else:
+            for j in range(len(testPathArr[i])):
+                    finalPath.append(testPathArr[i][j])
+            x2, y2 = zip(*testPathArr[i+1])
+
+    ax1.plot(xData, yData, c='black', marker='o', markersize='1')
+    x1, y1 = zip(*finalPath)
+    ax1.plot(x1, y1, c='b', marker='o', markersize='1')
+    
+    #plot
+    plt.axis('equal')
+    plt.show()
+    
     
     return 0
 
-
 if __name__ == "__main__":
     main()
-
-
