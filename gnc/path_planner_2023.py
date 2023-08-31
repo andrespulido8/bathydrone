@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
+""" Here add a description of the script
+    Author: Nicholas Sardinia
 """
-Updated algorithm to generate waypoints for convex polygons 
-"""
+import os
 import matplotlib.pyplot as plt
 import geopandas as gpd
 import matplotlib.path as pth
@@ -15,14 +16,21 @@ from shapely.prepared import prep
 
 
 def generatePath(polygonToPath, pathDist):
-    c1 = 0.9
-    c2 = 0.1
+    """ TODO: document this function
+    Input: polygonToPath - list of points in polygon 
+              pathDist - distance between waypoints
+    Output: chosenPath - list of points in path
+                bestPL - path length
+                emptyPath - flag for empty path
+    """
+    c1 = 0.9  # weight for path length
+    c2 = 0.1  # weight for number of turns
     lc = 100000000
     #optimization for path orientation.
     #Tests angle in 10 degree increments. Returns all path lengths. 
-    bestPL = 100000000
-    minTurns = 10000000
-    currPL = 0
+    bestPL = 100000000  #best path length
+    minTurns = 10000000  #minimum number of turns
+    currPL = 0  #current path length
     pathLengths = []
     savedNumTurns = 10000
     savedPL = 100000
@@ -154,8 +162,8 @@ def generatePath(polygonToPath, pathDist):
         
     return chosenPath, bestPL, emptyPath
 
-#Grid the polygon
 def grid_bounds(geom, delta):
+    """ Define a grid of cells for a polygon."""
     minx, miny, maxx, maxy = geom.bounds
     nx = int((maxx - minx)/delta)
     ny = int((maxy - miny)/delta)
@@ -167,15 +175,15 @@ def grid_bounds(geom, delta):
             grid.append( poly_ij )
     return grid
 
-#Define grid
 def partition(geom, delta):
+    """ Define a grid of cells for a polygon."""
     prepared_geom = prep(geom)
     gridFirst = list(filter(prepared_geom.intersects, grid_bounds(geom, delta)))
     grid = list(filter(prepared_geom.covers, grid_bounds(geom, delta)))
     return grid
     
-#Find the convex hull of a polygon
 def listConvexHull(polyPoints):
+    """ Find the convex hull of a polygon."""
     cHull = ConvexHull(polyPoints)
     listHull = []
     for i in range(len(cHull.vertices)):
@@ -183,8 +191,8 @@ def listConvexHull(polyPoints):
     #print(listHull)
     return listHull
 
-#Take a polygon, and export an inorder list of SL-concavities
 def concavityChecker(polyPoints, polyGeom):
+    """ Take a polygon, and export an inorder list of SL-concavities"""
     #print("iteration")
     
     conHullC = polyGeom.convex_hull.get_coordinates()
@@ -218,10 +226,11 @@ def concavityChecker(polyPoints, polyGeom):
             concavities[i] = abs((b1[0]-b2[0])*(b1[1]-polyPoints[i][1])-(b1[1]-b2[1])*(b1[0]-polyPoints[i][0]))/math.sqrt(math.pow(b1[0]-b2[0], 2)+math.pow(b1[1]-b2[1], 2))
     return concavities
 
-#Resolve by splitting into 2 polygons
-#TODO improve optimization
 def resolveConvex(polyPoints, rIndex, polyPointsGeom, concavities):
-    #tunable constants for hueristic
+    """ Resolve a convex polygon into two polygons."""
+    #TODO improve optimization
+
+    #tunable constants for heuristic 
     ignoreRange = [rIndex + len(concavities) / 5.0, rIndex - len(concavities)/5.0]
     sc = 0.1
     sd = 1
@@ -267,8 +276,12 @@ def resolveConvex(polyPoints, rIndex, polyPointsGeom, concavities):
 
     return poly1, poly2, polyGeom1, polyGeom2
     
-#Take a polygon and apply apprimate convex decomposition.
 def makeConvexRec(polyPoints, tolerance, polyStore, polyPointsGeom): 
+    """ Take a polygon and apply approximate convex decomposition.
+
+        Source: Lien et.al. "Approximate Convex Decomposition of Polygons" 
+        https://www.sciencedirect.com/science/article/pii/S0925772105001008
+    """
     concavityList = concavityChecker(polyPoints, polyPointsGeom)
     t = max(concavityList)
     if t <= tolerance:
@@ -282,6 +295,7 @@ def makeConvexRec(polyPoints, tolerance, polyStore, polyPointsGeom):
         makeConvexRec(ps2, tolerance, polyStore, polyGeom2)
 
 def makeConvex(polyPoints, tolerance, polyPointsGeom):
+    """ Take a polygon and apply approximate convex decomposition."""
     ps = []
     makeConvexRec(polyPoints, tolerance, ps, polyPointsGeom)
     return ps
@@ -290,26 +304,27 @@ def main():
     #Get polygon from edge detection
     xList = []
     yList = []
-    columns = ["Latitude", "Longitude"]
-    df = pd.read_csv("lake-wauburg-coords.csv", usecols=columns)
+
+    file_name = "lake-wauburg-coords.csv"
+    file_path = os.path.join(os.getcwd(), "csv", file_name)
+    df = pd.read_csv(file_path, usecols=["Latitude", "Longitude"])
     yList = df.Latitude.values.tolist()
-    for i in range(len(yList)):
-        yList[i] = abs(yList[i])
     xList = df.Longitude.values.tolist()
 
+    # TODO: use only xList and yList do not zip and then unpack 
     polygonToPath = list(zip(xList, yList))
-    xData, yData = zip(*polygonToPath)
+    xData, yData = zip(*polygonToPath)  
     
     pathDist = abs((max(xData) - min(xData))/15)
     path = generatePath(polygonToPath, pathDist)
     geom = Polygon(polygonToPath)
     
     #APPROXIMATE CONVEX DECOMPOSITION
-    tol = pathDist
+    tol = pathDist*1.5
     poly = gpd.GeoSeries([geom])
     polyCoords = poly.get_coordinates()
     polyCoordsList = list(polyCoords.itertuples(index=False, name=None))
-    pTest = makeConvex(polyCoordsList, tol*1.5, poly)
+    pTest = makeConvex(polyCoordsList, tol, poly)
 
     #PLOTTING DECOMPOSED FIGURE
     fig = plt.figure()
