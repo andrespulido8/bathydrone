@@ -13,6 +13,7 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   std_msgs REQUIRED
   geometry_msgs
+  gazebo REQUIRED
 )
 include_directories(${GAZEBO_INCLUDE_DIRS})
 ## System dependencies are found with CMake's conventions
