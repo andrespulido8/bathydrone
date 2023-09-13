@@ -1,6 +1,3 @@
-[submodule "simulation/vrx"]
-	path = simulation/vrx
-	url = https://github.com/osrf/vrx
 [submodule "gnc/lqRRT"]
 	path = gnc/lqRRT
 	url = git@github.com:andrespulido8/lqRRT.git
