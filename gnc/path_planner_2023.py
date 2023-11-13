@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-""" Here add a description of the script
+""" Generate a complete coverage path for a side-scan sonar vessel on an arbitrary convex region.
     Author: Nicholas Sardinia
 """
 import os
 import matplotlib.pyplot as plt
 import geopandas as gpd
-import matplotlib.path as pth
+import matplotlib.path as pths
 import numpy as np
 import math
 import csv
@@ -13,6 +13,7 @@ import pandas as pd
 from scipy.spatial import ConvexHull
 from shapely.geometry import Polygon
 from shapely.prepared import prep
+from py2opt.routefinder import RouteFinder
 
 
 def generatePath(polygonToPath, pathDist):
@@ -24,7 +25,7 @@ def generatePath(polygonToPath, pathDist):
                 emptyPath - flag for empty path
     """
     c1 = 0.9  # weight for path length
-    c2 = 0.1  # weight for number of turns
+    c2 = 0.4  # weight for number of turns
     lc = 100000000
     #optimization for path orientation.
     #Tests angle in 10 degree increments. Returns all path lengths. 
@@ -35,7 +36,10 @@ def generatePath(polygonToPath, pathDist):
     savedNumTurns = 10000
     savedPL = 100000
     
-    for testAngle in range(0, 180, 10):
+    #instead of gridding, test with linear distance to refine (max linear dist)
+    Bestgeom = Polygon(polygonToPath)
+    Bestgrid = partition(Bestgeom, pathDist)
+    for testAngle in range(0, 180, 30):
         polygonToPathRotated =  []      
 
         #rotation matrix
@@ -52,7 +56,6 @@ def generatePath(polygonToPath, pathDist):
         path = []
         manipulableGrid = list(grid)
         emptyPath = 0
-
         if len(manipulableGrid) >= 2:
             emptyPath = 0
             #PATHING THE GRID
@@ -140,7 +143,7 @@ def generatePath(polygonToPath, pathDist):
                 distTemp += math.sqrt(distX + distY)
             totalLength += distTemp
             currPL = totalLength
-            currC = c1*currPL + c2*numTurns
+            currC = 0.001*currPL + c2*numTurns
             pathLengths.append(totalLength)   
 
             if lc > currC:
@@ -148,6 +151,8 @@ def generatePath(polygonToPath, pathDist):
                 lc = currC
                 savedPL = currPL
                 savedNumTurns = numTurns
+                Bestgrid = grid
+                Bestgeom = geom
             
             if bestPL > currPL:
                 bestPL = currPL
@@ -160,7 +165,7 @@ def generatePath(polygonToPath, pathDist):
             emptyPath = 1
 
         
-    return chosenPath, bestPL, emptyPath
+    return chosenPath, bestPL, emptyPath, Bestgrid, Bestgeom
 
 def grid_bounds(geom, delta):
     """ Define a grid of cells for a polygon."""
@@ -188,12 +193,10 @@ def listConvexHull(polyPoints):
     listHull = []
     for i in range(len(cHull.vertices)):
         listHull.append(polyPoints[cHull.vertices[i]])
-    #print(listHull)
     return listHull
 
 def concavityChecker(polyPoints, polyGeom):
     """ Take a polygon, and export an inorder list of SL-concavities"""
-    #print("iteration")
     
     conHullC = polyGeom.convex_hull.get_coordinates()
     conHull = list(conHullC.itertuples(index=False, name=None))
@@ -234,7 +237,6 @@ def resolveConvex(polyPoints, rIndex, polyPointsGeom, concavities):
     ignoreRange = [rIndex + len(concavities) / 5.0, rIndex - len(concavities)/5.0]
     sc = 0.1
     sd = 1
-
     #Find split points
     bestScore = 0
     bestDex = 0
@@ -301,73 +303,106 @@ def makeConvex(polyPoints, tolerance, polyPointsGeom):
     return ps
 
 def main():
-    #Get polygon from edge detection
+
+    # GET BOUNDING POLYGON FROM CSV
     xList = []
     yList = []
-
-    file_name = "lake-wauburg-coords.csv"
+    file_name = "lake-santa-fe-coords.csv"
     file_path = os.path.join(os.getcwd(), "csv", file_name)
     df = pd.read_csv(file_path, usecols=["Latitude", "Longitude"])
     yList = df.Latitude.values.tolist()
     xList = df.Longitude.values.tolist()
-
-    # TODO: use only xList and yList do not zip and then unpack 
-    polygonToPath = list(zip(xList, yList))
-    xData, yData = zip(*polygonToPath)  
     
-    pathDist = abs((max(xData) - min(xData))/15)
-    path = generatePath(polygonToPath, pathDist)
+    # GENERATE POLYGON OBJECT (required for shapely)
+    polygonToPath = list(zip(xList, yList))
     geom = Polygon(polygonToPath)
     
-    #APPROXIMATE CONVEX DECOMPOSITION
-    tol = pathDist*1.5
+    # PATH DISTANCE CALCULATION (when physical parameters are unknown)
+    pathDist = abs((max(xList) - min(xList))/15)
+
+    # APPROXIMATE DECOMPOSITION
+    tol = pathDist*1
     poly = gpd.GeoSeries([geom])
     polyCoords = poly.get_coordinates()
     polyCoordsList = list(polyCoords.itertuples(index=False, name=None))
     pTest = makeConvex(polyCoordsList, tol, poly)
+    
 
-    #PLOTTING DECOMPOSED FIGURE
+
+    # TODO Integrate as function
+    # GENERATE PATH FOR EACH DECOMPOSED POLYGON
+    testPathArr = []
+    pathDistOrig = pathDist
+    startPos = [min(xList), min(yList)]
+    pathCenters = [startPos]
+    for i in range(len(pTest)):
+        x1, y1 = zip(*pTest[i])
+        maxArea = (max(x1)-min(x1))*(max(y1)-min(y1))
+        if (maxArea > (5*pathDistOrig*pathDistOrig)):
+            genPath = generatePath(pTest[i], pathDist)
+            if (len(genPath[0]) > 1):
+                testPathArr.append(genPath[0])
+                xCenter, yCenter = zip(*genPath[0])
+                xLoc = (max(xCenter) + min(xCenter))/2
+                yLoc = (max(yCenter) + min(yCenter))/2
+                pathCenters.append([xLoc, yLoc])
+
+    
+    #TODO Integrate as function
+    # 2-OPT HEURISTIC
+    pathLocs = []
+    print(pathCenters)
+    for i in range(len(pathCenters)):
+        pathLocs.append(str(i))
+
+    distMat = []
+    for i in range(len(pathCenters)):
+        currMat = []
+        for j in range(len(pathCenters)):
+            currMat.append(math.dist(pathCenters[i], pathCenters[j]))
+        distMat.append(currMat)
+
+    initDist = 0
+    for i in range(len(pathCenters)-1):
+        initDist += distMat[i][i+1]
+    
+    # 2-OPT ITERATION (from py2opt libary, stable)
+    route_finder = RouteFinder(distMat, pathLocs, iterations=5)
+    best_distance, best_route = route_finder.solve()
+
+
+
+    ##############################                          
+    ##  PLOTTING FUNCTIONALITY  ##
+    ##############################                          
+    
+    # PLOTTING SETUP
     fig = plt.figure()
     ax1 = fig.add_subplot(111)
     ax1.axes.get_xaxis().set_visible(False)
     ax1.axes.get_yaxis().set_visible(False)
-    testPathArr = []
-    pathDistOrig = pathDist
-    pathDist = pathDist/1.5
-    pathLengthTot=0
 
-    for i in range(len(pTest)):
-        x1, y1 = zip(*pTest[i])
-        #pathDist = abs((max(x1) - min(x1))/15)
-        #Maximum area heuristic
-        maxArea = (max(x1)-min(x1))*(max(y1)-min(y1))
-        if (maxArea > (5*pathDistOrig*pathDistOrig)):
-            genPath = generatePath(pTest[i], pathDist)
-            if (len(genPath[0]) > 2):
-                testPathArr.append(genPath[0])
-                pathLengthTot += genPath[1]
-
-           
-    #Dumb path connection
-    finalPath = []
+    # PLOTTING PATHS
+    print(testPathArr)
+    ax1.plot(xList, yList, c='black', marker='o', markersize='0.25')
     for i in range(len(testPathArr)):
-         x1, y1 = zip(*testPathArr[i])
-         if (i == len(testPathArr)-1):
-            for j in range(len(testPathArr[i])):
-                finalPath.append(testPathArr[i][j])
-         else:
-            for j in range(len(testPathArr[i])):
-                    finalPath.append(testPathArr[i][j])
-            x2, y2 = zip(*testPathArr[i+1])
-
-    ax1.plot(xData, yData, c='black', marker='o', markersize='1')
-    x1, y1 = zip(*finalPath)
-    ax1.plot(x1, y1, c='b', marker='o', markersize='1')
+        x1, y1 = zip(*testPathArr[i])
+        ax1.plot(x1, y1, c='green', marker='o', markersize='0.5', zorder=1)
     
-    #plot
+    # PLOTTING VISIT ORDER
+    j = 0
+    sSize = abs(abs(max(xList))-abs((min(xList)))) * abs(abs(max(yList))-abs((min(yList))))*50000
+    xc2, yc2 = zip(*pathCenters)
+
+
+    for xIm, yIm in zip(xc2, yc2):
+        ax1.text(xIm, yIm, str(j), color='grey', fontsize=12, fontweight="bold", zorder=3)
+        #plt.scatter(xIm, yIm, s=sSize, facecolors='white', edgecolors='grey', zorder=2)
+        j += 1
+
+    # SHOW PLOT
     plt.axis('equal')
     plt.show()
-    
     
     return 0
 
