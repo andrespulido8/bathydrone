@@ -17,7 +17,7 @@ from py2opt.routefinder import RouteFinder
 
 
 def generatePath(polygonToPath, pathDist):
-    """ TODO: document this function
+    """
     Input: polygonToPath - list of points in polygon 
               pathDist - distance between waypoints
     Output: chosenPath - list of points in path
@@ -26,7 +26,7 @@ def generatePath(polygonToPath, pathDist):
     """
     c1 = 0.9  # weight for path length
     c2 = 0.4  # weight for number of turns
-    lc = 100000000
+    lc = 100000000 #starting cost, very high to avoid initialization issues.
     #optimization for path orientation.
     #Tests angle in 10 degree increments. Returns all path lengths. 
     bestPL = 100000000  #best path length
@@ -168,7 +168,11 @@ def generatePath(polygonToPath, pathDist):
     return chosenPath, bestPL, emptyPath, Bestgrid, Bestgeom
 
 def grid_bounds(geom, delta):
-    """ Define a grid of cells for a polygon."""
+    """ 
+    Input: geom (shapely polygon), delta (distance between path lines)
+    Output: grid boundaries from which to draw path.
+    """
+
     minx, miny, maxx, maxy = geom.bounds
     nx = int((maxx - minx)/delta)
     ny = int((maxy - miny)/delta)
@@ -303,7 +307,9 @@ def makeConvex(polyPoints, tolerance, polyPointsGeom):
     return ps
 
 def main():
-
+    """
+    GENERATE PATH FROM EDGE DETECTION AND PLOT
+    """
     # GET BOUNDING POLYGON FROM CSV
     xList = []
     yList = []
