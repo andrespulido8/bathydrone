@@ -4,11 +4,11 @@ pipeline and conversion of water perimeter points into latitude and
 longitude coordinates.
 '''
 #!/usr/bin/env python3
-import numpy as np
 import math
 import csv  # for writing out coordinates to a CSV file
+import numpy as np
 import cv2  # OpenCV python library
-import grip # GRIP-generated pipeline (see grip.py)
+import grip_sfwmd_left as grip # GRIP-generated pipeline
 
 def find_bounding_points(contour):
     '''
@@ -81,7 +81,7 @@ def scale_contour(num_points, contour):
 
     # use slicing to take every n-th item
     new_contour = contour[0::step_size]
-    if len(new_contour) < len(contour):
+    if len(new_contour) < num_points:
         new_contour = np.append(new_contour, [contour[len(contour)-1]], axis=0)
 
     return new_contour
@@ -91,13 +91,12 @@ def draw_contour(img, contour):
     '''
     Draws a contour on the input image.
     '''
-    cv2.drawContours(img, [contour], 0, (0, 255, 0), 3)
+    cv2.drawContours(img, contour, 0, (0, 255, 0), 3)
 
 def draw_points(img, points):
     '''
     Draws a list of (x, y) points on the input image.
     '''
-
     for point in points:
         cv2.circle(img, point[0], radius=8, color=(255, 50, 50), thickness=-1)
 
@@ -121,13 +120,16 @@ def main():
     Main function to demonstrate OpenCV pipeline functionality.
     '''
 
-    # Read in the test image of Newnans Lake.
-    img = cv2.imread("Figures/newnans-lake-1.png")
+    # Read in the test image
+    img = cv2.imread("Figures/sfwmd_2k_left.tif")
 
     # Run the image through the pipeline.
     pipeline = grip.Pipeline()
     pipeline.process(img)
     filtered_contours = pipeline.filter_contours_output
+
+    # Make sure we found at least one contour
+    assert len(filtered_contours) != 0, "Pipeline did not return any contours. Consider retuning the parameters for the HSV threshold in the pipeline."
 
     # Take the first contour from the list (which, in our case, is the
     # Newnans Lake contour).
@@ -138,15 +140,19 @@ def main():
     # Find (x, y) points bounding Newnans Lake.
     nnl_xy = find_bounding_points(nnl_contour)
 
+
+    # Bound input filename
+    bounds_input_filename = 'input-bounds.csv'
+
     # Prompt the user to collect lat/long bounding points
     print('Manual collection of bounding latitude/longitude points is required.')
 
     collect_latlong = input('Would you like to collect new points now? (y/N): ')
     if collect_latlong == 'y':
-        print('Please collect latitudes of top and bottom points on Newnans Lake,\n\
+        print(f'Please collect latitudes of top and bottom points on Newnans Lake,\n\
                 as well as longitudes of left and right points (highlighted blue),\n\
                 using Google Maps or a similar tool. Then add these to the input\n\
-                file \'newnans-lake-bounds.csv\' and restart this script.')
+                file \'{bounds_input_filename}\' and restart this script.')
         input('Press Enter to see the points drawn on the image. Press any key to\n\
                 close the image when you are finished.')
 
@@ -159,7 +165,7 @@ def main():
     # Latitude and longitude values for a bounding box around Newnans Lake.
     # Points are arranged South-to-North and East-to-West respectively.
     # Points are read in from input file.
-    with open('newnans-lake-bounds.csv', 'r', encoding='UTF-8', newline='') as csvfile:
+    with open(bounds_input_filename, 'r', encoding='UTF-8', newline='') as csvfile:
         reader = csv.reader(csvfile)
 
         for row in reader:
@@ -176,7 +182,7 @@ def main():
     # make sure the lat/long points were pulled in successfully
     assert nnl_latlong
 
-    output_file_name = 'newnans-lake-coords.csv'
+    output_file_name = 'output-coords.csv'
     print(f'Not collecting lat/long bounds. Output will be sent to {output_file_name}.')
 
     num_latlong_points = int(input("Please enter the number of points you would like to output: "))

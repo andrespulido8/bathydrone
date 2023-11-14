@@ -13,34 +13,46 @@ class Pipeline:
         """
 
         self.__blur_type = BlurType.Box_Blur
-        self.__blur_radius = 10.81081081081081
+        self.__blur_radius = 7.419683834778174
 
         self.blur_output = None
 
-        self.__hsv_threshold_input = self.blur_output
-        self.__hsv_threshold_hue = [44, 78]
-        self.__hsv_threshold_saturation = [55, 93]
-        self.__hsv_threshold_value = [55, 127]
+        self.__hsv_threshold_0_input = self.blur_output
+        self.__hsv_threshold_0_hue = [0.0, 42.47877758913412]
+        self.__hsv_threshold_0_saturation = [0.0, 153.25976230899832]
+        self.__hsv_threshold_0_value = [0.0, 68.83701188455008]
 
-        self.hsv_threshold_output = None
+        self.hsv_threshold_0_output = None
 
-        self.__find_contours_input = self.hsv_threshold_output
+        self.__hsv_threshold_1_input = self.blur_output
+        self.__hsv_threshold_1_hue = [0.0, 30.539863246273]
+        self.__hsv_threshold_1_saturation = [55.03597122302158, 134.92294520547946]
+        self.__hsv_threshold_1_value = [64.83290681429447, 110.85193443728632]
+
+        self.hsv_threshold_1_output = None
+
+        self.__cv_bitwise_or_src1 = self.hsv_threshold_0_output
+        self.__cv_bitwise_or_src2 = self.hsv_threshold_1_output
+
+        self.cv_bitwise_or_output = None
+
+        self.__find_contours_input = self.cv_bitwise_or_output
         self.__find_contours_external_only = False
 
         self.find_contours_output = None
 
         self.__filter_contours_contours = self.find_contours_output
-        self.__filter_contours_min_area = 30000.0
-        self.__filter_contours_min_perimeter = 0
-        self.__filter_contours_min_width = 0
-        self.__filter_contours_max_width = 1000
-        self.__filter_contours_min_height = 0
-        self.__filter_contours_max_height = 1000
+        self.__filter_contours_min_area = 20000.0
+        self.__filter_contours_min_perimeter = 0.0
+        self.__filter_contours_min_width = 0.0
+        self.__filter_contours_max_width = 2.147483647E9
+        self.__filter_contours_min_height = 0.0
+        self.__filter_contours_max_height = 2.147483647E9
         self.__filter_contours_solidity = [0, 100]
-        self.__filter_contours_max_vertices = 1000000
-        self.__filter_contours_min_vertices = 0
-        self.__filter_contours_min_ratio = 0
-        self.__filter_contours_max_ratio = 1000
+        self.__filter_contours_max_vertices = 2.147483647E9
+        self.__filter_contours_min_vertices = 0.0
+        self.__filter_contours_min_ratio = 0.0
+        self.__filter_contours_max_ratio = 2.147483647E9
 
         self.filter_contours_output = None
 
@@ -54,11 +66,20 @@ class Pipeline:
         (self.blur_output) = self.__blur(self.__blur_input, self.__blur_type, self.__blur_radius)
 
         # Step HSV_Threshold0:
-        self.__hsv_threshold_input = self.blur_output
-        (self.hsv_threshold_output) = self.__hsv_threshold(self.__hsv_threshold_input, self.__hsv_threshold_hue, self.__hsv_threshold_saturation, self.__hsv_threshold_value)
+        self.__hsv_threshold_0_input = self.blur_output
+        (self.hsv_threshold_0_output) = self.__hsv_threshold(self.__hsv_threshold_0_input, self.__hsv_threshold_0_hue, self.__hsv_threshold_0_saturation, self.__hsv_threshold_0_value)
+
+        # Step HSV_Threshold1:
+        self.__hsv_threshold_1_input = self.blur_output
+        (self.hsv_threshold_1_output) = self.__hsv_threshold(self.__hsv_threshold_1_input, self.__hsv_threshold_1_hue, self.__hsv_threshold_1_saturation, self.__hsv_threshold_1_value)
+
+        # Step CV_bitwise_or0:
+        self.__cv_bitwise_or_src1 = self.hsv_threshold_0_output
+        self.__cv_bitwise_or_src2 = self.hsv_threshold_1_output
+        (self.cv_bitwise_or_output) = self.__cv_bitwise_or(self.__cv_bitwise_or_src1, self.__cv_bitwise_or_src2)
 
         # Step Find_Contours0:
-        self.__find_contours_input = self.hsv_threshold_output
+        self.__find_contours_input = self.cv_bitwise_or_output
         (self.find_contours_output) = self.__find_contours(self.__find_contours_input, self.__find_contours_external_only)
 
         # Step Filter_Contours0:
@@ -101,6 +122,17 @@ class Pipeline:
         """
         out = cv2.cvtColor(input, cv2.COLOR_BGR2HSV)
         return cv2.inRange(out, (hue[0], sat[0], val[0]),  (hue[1], sat[1], val[1]))
+
+    @staticmethod
+    def __cv_bitwise_or(src1, src2):
+        """Computes the per channel or of two images.
+        Args:
+            src1: A numpy.ndarray.
+            src2: A numpy.ndarray.
+        Returns:
+            A numpy.ndarray the or of the two mats.
+        """
+        return cv2.bitwise_or(src1, src2)
 
     @staticmethod
     def __find_contours(input, external_only):

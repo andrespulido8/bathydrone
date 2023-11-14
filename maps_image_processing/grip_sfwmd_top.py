@@ -13,14 +13,14 @@ class Pipeline:
         """
 
         self.__blur_type = BlurType.Box_Blur
-        self.__blur_radius = 10.81081081081081
+        self.__blur_radius = 2.7027027027027026
 
         self.blur_output = None
 
         self.__hsv_threshold_input = self.blur_output
-        self.__hsv_threshold_hue = [44, 78]
-        self.__hsv_threshold_saturation = [55, 93]
-        self.__hsv_threshold_value = [55, 127]
+        self.__hsv_threshold_hue = [0.0, 115.82342954159591]
+        self.__hsv_threshold_saturation = [13.758992805755396, 125.11884550084889]
+        self.__hsv_threshold_value = [22.93165467625899, 103.47198641765704]
 
         self.hsv_threshold_output = None
 
@@ -30,17 +30,17 @@ class Pipeline:
         self.find_contours_output = None
 
         self.__filter_contours_contours = self.find_contours_output
-        self.__filter_contours_min_area = 30000.0
+        self.__filter_contours_min_area = 20000.0
         self.__filter_contours_min_perimeter = 0
         self.__filter_contours_min_width = 0
-        self.__filter_contours_max_width = 1000
+        self.__filter_contours_max_width = 1.0E8
         self.__filter_contours_min_height = 0
-        self.__filter_contours_max_height = 1000
+        self.__filter_contours_max_height = 1.0E7
         self.__filter_contours_solidity = [0, 100]
         self.__filter_contours_max_vertices = 1000000
         self.__filter_contours_min_vertices = 0
         self.__filter_contours_min_ratio = 0
-        self.__filter_contours_max_ratio = 1000
+        self.__filter_contours_max_ratio = 1.0E9
 
         self.filter_contours_output = None
 
