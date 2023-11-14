@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 Contains a model of a 3DOF marine ship. Supplies parameter values,
-a function for the full nonlinear dynamic. Running this script as
-__main__ will present a quick open-loop simulation.
+a function for the full nonlinear dynamic. Input is drone velocity.  
 
 State is: [x_world_position (m),
             y_world_position (m),
