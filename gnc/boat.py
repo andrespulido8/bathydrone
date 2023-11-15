@@ -1,6 +1,17 @@
 #!/usr/bin/env python3
 """ Path and trajectory planning and controls for the tethered boat
     simulation
+
+    User can choose between different control types with IS_OPEN_LOOP. Open loop,
+    means the drone position is already determined. Closed loop means we need to 
+    calculate the drone position based on the control input. The user also chooses
+    the path_type: 
+        'line' = straight line drone and boat path if open loop 
+        'lawnmower' = lawnmower pattern for the boat reference. Also for the drone if open loop 
+        'obstacle' = single goal waypoint with obstacle in the middle. Use lqRRT for drone so only closed loop
+        'trajectory' = use lawnmower for boat reference and lqRRT for drone so only closed loop 
+        'data' = trajectory from data collected in the field, saved as a csv, and used as the boat
+        reference. Also drone if open loop
 """
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
@@ -13,11 +24,9 @@ from tethered_dynamics import TetheredDynamics
 
 npl = np.linalg
 
-IS_OPEN_LOOP = False
+IS_OPEN_LOOP = False 
 
-# TODO: fix open loop with line
-path_type = "data"  # 'lawnmower', 'line', 'obstacle', 'trajectory' or 'data'
-# data can be open or closed loop
+path_type = "trajectory"  # 'lawnmower', 'line', 'obstacle', 'trajectory' or 'data'
 
 # Controller parameters
 kp = np.array([0.08, 0.08, 0])
@@ -31,18 +40,11 @@ traj_tolerance = 15.0
 err_reset_dist = 50
 is_debug = False
 
-if path_type == "data" or path_type == "line":
-    # Trajectory
-    echo_3_051722 = pd.read_csv("./traj_data/force_traj_3.csv")
-    echo_6_051722 = pd.read_csv("./traj_data/force_traj_6.csv")
-    echo_9_051722 = pd.read_csv("./traj_data/force_traj_9.csv")
-    echo_12_051722 = pd.read_csv("./traj_data/force_traj_12.csv")
-    drone_3 = pd.read_csv("./traj_data/drone_traj_3.csv")
-    drone_6 = pd.read_csv("./traj_data/drone_traj_6.csv")
-    drone_9 = pd.read_csv("./traj_data/drone_traj_9.csv")
-    drone_12 = pd.read_csv("./traj_data/drone_traj_12.csv")
-    echos = [echo_3_051722, echo_6_051722, echo_9_051722, echo_12_051722]
-    drones = [drone_3, drone_6, drone_9, drone_12]
+if path_type == "data":
+    # Get data collected in the field 
+    traj_path = "./csv/traj_data/"
+    force_files = ["force_traj_3", "force_traj_6", "force_traj_9", "force_traj_12"]
+    drone_files = ["drone_traj_3", "drone_traj_6", "drone_traj_9", "drone_traj_12"]
 elif path_type == "lawnmower" or path_type == "trajectory":
     sp1 = [0, 0]
     sp2 = [120, 80]
@@ -93,14 +95,12 @@ def gen_ss(seed, goal, buff=[1] * 4):
         (seed[8], seed[8]),
     ]
 
-
 # Definition of collision
 def is_feasible(x, u):
     for ob in obs:
         if npl.norm(x[:2] - ob[:2]) <= boat_length / 2 + ob[2]:
             return False
     return True
-
 
 def erf(xgoal, x):
     """Returns error e given two states xgoal and x.
@@ -113,7 +113,6 @@ def erf(xgoal, x):
     e[2] = np.arctan2(sg * c - cg * s, cg * c + sg * s)
     return e
 
-
 def lqr(x, u):
     """Returns cost-to-go matrix S and policy matrix K given local state x and effort u."""
     global kp, kd
@@ -124,17 +123,19 @@ def lqr(x, u):
     return (S, K)
 
 
+## Get data from dataframe
 def get_boat_position(t, ii):
     """
     Return the position of the boat in a point in time
     Path types:
-        'line' = empty
+        'line' = straight line 
         'data' = get the trajectory from a csv
             for data it finds the index of the data time that most
             closely match the simulation time
     """
-    if path_type == "line" and not IS_OPEN_LOOP:
-        raise ValueError('Path type "line" is only for open loop simulations')
+    if path_type == "line":
+        mx = 0.7; my = 0.7
+        return np.array([mx * t, my * t, np.arctan2(my,mx), mx, my, 0]), 0
     else:
         t_i = df_dr["time"].iloc[ii]
         while t_i <= t:
@@ -149,22 +150,17 @@ def get_drone_position(t, hd, ii):
     """
     Return the position of the drone in a point in time,
     depending on the desired velocity
-    Path types:
-        'line' = straight line
-        'data' = get the trajectory from a csv
+        = get the trajectory from a csv
             for data it finds the index of the data time that most
             closely match the simulation time
     """
-    if path_type == "line":
-        return np.array([0.7 * t, 0.7 * t, hd]), 0
-    elif path_type == "data":
+    t_i = df_dr["time"].iloc[ii]
+    while t_i <= t:
         t_i = df_dr["time"].iloc[ii]
-        while t_i <= t:
-            t_i = df_dr["time"].iloc[ii]
-            ii += 1
-        x = df_dr["X_m"].iloc[ii]
-        y = df_dr["Y_m"].iloc[ii]
-        return np.array([x, y, hd]), ii
+        ii += 1
+    x = df_dr["X_m"].iloc[ii]
+    y = df_dr["Y_m"].iloc[ii]
+    return np.array([x, y, hd]), ii
 
 
 def pid_controller(t, t_last, q, q_ref, q_dot, q_ref_dot, err_accumulation):
@@ -229,11 +225,12 @@ def get_R(q):
 # SIMULATION
 if __name__ == "__main__":
 
+    # Choose one option from the datasets 
     data_file_index = 1
-    if path_type == "data" or path_type == "line":
+    if path_type == "data":
         # Choose one option from the datasets (drones and echos)
-        df_dr = drones[data_file_index]
-        df_bt = echos[data_file_index]
+        df_dr = pd.read_csv(traj_path + drone_files[data_file_index] + ".csv")
+        df_bt = pd.read_csv(traj_path + force_files[data_file_index] + ".csv") 
 
         # Fix delta in time
         # kk = np.argmax(df_dr['Y_m'].to_numpy() <= df_bt['Y_m'].to_numpy()[0])
@@ -273,7 +270,7 @@ if __name__ == "__main__":
                 0,
             ],
             dtype=np.float64,
-        )
+        )  # boat state [m, m, rad, m/s, m/s, rad/s]
         goal_counter = 0
         index_counter = 0
         is_same_goal = False
@@ -290,6 +287,7 @@ if __name__ == "__main__":
     q = np.copy(q0)
     x = np.concatenate((q0, dr0))
 
+    ## Setup lqRRT planner
     if path_type == "obstacle" or path_type == "trajectory":
         constraints = lqrrt.Constraints(
             nstates=nstates,
@@ -335,7 +333,7 @@ if __name__ == "__main__":
             planner.update_plan(
                 np.copy(x), sample_space, goal_bias=goal_bias, finish_on_goal=True
             )
-        else:
+        else:  # path_type == "trajectory":
             s0 = np.copy(x)
             get_state_history = []
             u_ref_history = []
@@ -405,31 +403,36 @@ if __name__ == "__main__":
     for i, t in enumerate(t_arr):
 
         q_dot = q[3:6]
+        if path_type == "lawnmower":
+            if traj.shape[0] == ii_last:
+                print("End of data. Time=", t)
+                break
+            q_ref = traj[ii_last]
+            q_ref_dot = traj[ii_last][3:6]
+            ee = erf(q_ref[:3], np.copy(q[:3]))
+            if npl.norm(ee[:2]) < traj_tolerance:
+                ii_last = ii_last + 1
+        elif path_type == "data" or path_type == "line":
+            # q_ref is boat position from the data
+            q_ref, ii_last = get_boat_position(t, ii_last)
+            q_ref_dot = 0
         if IS_OPEN_LOOP:
             if npl.norm(q[:2] - dr[:2]) <= dynamics.proj_le + dynamics.dL:
-                dynamics.dr, i_last = get_drone_position(t_last, dynamics.hd, i_last)
+                if path_type == "data":
+                    dynamics.dr, i_last = get_drone_position(t_last, dynamics.hd, i_last)
+                elif path_type == "lawnmower":
+                    dynamics.dr = q_ref[:3]
                 t_last += dt
-            q_ref, ii_last = get_boat_position(t, ii_last)
+            if path_type == "line":
+                q_ref = np.concatenate((dr, np.zeros(3)))
             v_dr = np.array([0, 0, 0])
+            dr = dynamics.dr 
         else:
-            if path_type == "data":
-                # q_ref is boat position from the data
-                q_ref, ii_last = get_boat_position(t, ii_last)
-                q_ref_dot = 0
-            elif path_type == "obstacle":
+            if path_type == "obstacle":
                 # Planner's decision
                 u_ref = planner.get_effort(t)
                 q_ref = planner.get_state(t)
                 q_ref_dot = q_ref[3:6]
-            elif path_type == "lawnmower":
-                if traj.shape[0] == ii_last:
-                    print("End of data. Time=", t)
-                    break
-                q_ref = traj[ii_last]
-                q_ref_dot = traj[ii_last][3:6]
-                ee = erf(q_ref[:3], np.copy(q[:3]))
-                if npl.norm(ee[:2]) < traj_tolerance:
-                    ii_last = ii_last + 1
             elif path_type == "trajectory":
                 # TIME ATTEMPT
                 # if t > t_delta:
@@ -476,11 +479,11 @@ if __name__ == "__main__":
             p_cmd_hist[i] = p_cmd
             i_cmd_hist[i] = i_cmd
 
-        # Step forward, qnext = qlast + qdot*dt
-        x = np.concatenate((q, dr))
+        # Step forward, x_next = x_last + x_dot*dt
+        x = np.concatenate((q, dr)) if not IS_OPEN_LOOP else q
         x = dynamics.step(x, v_dr, dt)
         q = x[:6]
-        dr = x[6:]
+        dr = x[6:] if not IS_OPEN_LOOP else dr
 
     ## PLOTS
     print("\nPlotting...")
@@ -495,7 +498,7 @@ if __name__ == "__main__":
     ax = fig1.add_subplot(fig1rows, fig1cols, 1)
     ax.set_title("X Position (m)", fontsize=16)
     ax.plot(t_arr, q_history[:, 0], "-g", label="sim boat")
-    ax.plot(t_arr, dr_history[:, 0], "--b", label="drone")
+    ax.plot(t_arr, dr_history[:, 0], "--b",  label="drone")
     if not IS_OPEN_LOOP:
         ax.plot(t_arr, bt_history[:, 0], "-.r", label="boat reference boat(data)")
         ax.plot(t_arr, bt_history[:, 0] - traj_tolerance, "--r")
@@ -720,7 +723,7 @@ if __name__ == "__main__":
         linewidth=lthick,
     )
     pref = ax6.scatter(
-        dr_history[0, 0], dr_history[0, 1], color="b", s=pthick, label="drone"
+        dr_history[0, 0], dr_history[0, 1], color="b", s=pthick, marker='s', label="drone"
     )
     href = ax6.plot(
         [dr_history[0, 0], dr_history[0, 0] + rope[0, 0]],
@@ -786,7 +789,7 @@ if __name__ == "__main__":
             return [p, h, pref, href, pact]
 
     # Run animation
-    ani = animation.FuncAnimation(fig6, func=update_ani, interval=dt * 1000 / speedup)
+    ani = animation.FuncAnimation(fig6, func=update_ani, interval=dt * 1000 / speedup, save_count=100)
     plt.legend()
     plt.show()
 
@@ -821,7 +824,6 @@ if __name__ == "__main__":
         {
             "text.usetex": True,
             "font.family": "sans-serif",
-            "font.sans-serif": ["Helvetica"],
         }
     )
     plt.rcParams.update({"font.size": 18})

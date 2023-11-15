@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 Contains a model of a 3DOF marine ship. Supplies parameter values,
-a function for the full nonlinear dynamic. Running this script as
-__main__ will present a quick open-loop simulation.
+a function for the full nonlinear dynamic. Input is drone velocity.  
 
 State is: [x_world_position (m),
             y_world_position (m),
@@ -41,8 +40,8 @@ off_x = 0.1905  # measured from the bathydrone vehicle
 off_z = 0.1016
 r = np.array([off_x, 0, off_z])
 # height of drone above water
-hd = 20 * 0.681818  # feet to meters
-le = 31 * 0.681818  # Length of rope
+hd = 20 * 0.3048  # feet to meters
+le = 31 * 0.3048  # Length of rope
 proj_le = np.sqrt(le**2 - hd**2)
 dL = 1  # tolrance length for rope constraint
 
@@ -103,6 +102,7 @@ class TetheredDynamics:
         self.ten = np.array([0, 0, 0], dtype=np.float64)
         self.u = np.array([0, 0, 0], dtype=np.float64)
         self.diff_pos = np.array([0, 0], dtype=np.float64)
+        # TODO: MAKE THE LINEAR RELATIONSHIP EXPLICIT IN THE CODE BY SETTING THE MAX SPEED OF DRONE BASED ON FORCE AND DO GOAL VELOCITY THAT MAX SPEED
         self.ten_mag = ten_mag
         self.hd = hd
         self.proj_le = proj_le
