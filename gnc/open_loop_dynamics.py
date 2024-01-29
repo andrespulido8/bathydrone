@@ -135,6 +135,8 @@ class OpenLoopDynamics:
         # Rope length constraint
         if npl.norm(q[:2] - self.dr[:2]) < proj_le - dL:
             self.u = np.array([0, 0, 0])
+        else:
+            self.u = self.u
         # Centripetal-coriolis matrix
         C = np.array(
             [
