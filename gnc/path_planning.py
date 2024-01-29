@@ -6,11 +6,13 @@ import numpy as np
 
 
 class pp:
-    """TODO: describe the class here. Inputs and outputs"""
+    """Creates inputs for the setpoints ("sp") of a square or rectangle with sp1
+    as the first initial point as [x,y] input and sp2 as the second point
+    also as [x,y] input."""
 
     # enter sp1 as [x,y]
     # enter sp2 as [x,y]
-    def __init__(self, sp1=110, sp2=60, dy=40, is_plot=False):
+    def __init__(self, sp1=[0, 0], sp2=[170, 80], dy=40, is_plot=False):
         self.sp1 = sp1
         self.sp2 = np.transpose(sp2)
         self.sp = [sp1, sp2]
@@ -20,11 +22,12 @@ class pp:
         self.dr = 6
 
     def path(self, s0=np.array([0, 0])):
-        """TODO: describe the function here with inputs
-        and outputs
+        """TBased on two initial setpoints, creates the remaining two points
+        based on square/rectangle geometry
         Inputs:
            s0: initial position x and y of the robot
         """
+        # TODO: make it able to end going either up or down, not just down
         self.x_distance = self.sp2[0] - self.sp1[0]
         self.y_distance = self.sp2[1] - self.sp1[1]
 
@@ -32,6 +35,7 @@ class pp:
         self.sp4 = [self.sp1[0], self.sp1[1] + self.y_distance]
         self.square = [self.sp1, self.sp2, self.sp3, self.sp4]
 
+        # Sets up variables for the semi-circular cases for the path
         S = []
 
         h_arr = np.arange(self.sp1[0], self.sp3[0], self.dy)  # circle case
@@ -39,9 +43,9 @@ class pp:
             (self.sp1[0] + (self.dy / 2)), self.sp3[0], self.dy
         )  # circle case
 
-        r = (self.dy - self.sp1[0]) / 4  # radius
-        k = self.sp4[1] - ((1 / 2) * self.dy)  # top case
-        l = self.sp1[1] + ((1 / 2) * self.dy)  # bottom case
+        r = (self.dy - self.sp1[0]) / 4  # radius of the turn
+        k = self.sp4[1] - ((1 / 2) * self.dy)  # top semi-circular case
+        l = self.sp1[1] + ((1 / 2) * self.dy)  # bottom semi-circular case
 
         T = np.arange(
             self.sp1[0], (self.sp3[0] + self.dy / 2), self.dy / 2
@@ -211,7 +215,7 @@ def main():
     planning = pp(sp1, sp2, dy, is_plot)
     traj = planning.trajectory(2)
     planning.plot()
-    print(traj.shape)
+    # print(traj.shape)
     return 0
 
 

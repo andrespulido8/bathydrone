@@ -1,3 +1,10 @@
+""" System ID of the bathy-drone vessel by doing a least squares fit of the
+    drag coefficients. The drag coefficients are found by fitting the
+    relationship between the speed of the boat and the tension force in the
+    tether. The tether is assumed to be straight and horizontal. The 
+    tension force in the tether and the boat speed is measured experimentally
+"""
+
 import matplotlib.pyplot as plt
 import numpy as np
 
