@@ -26,7 +26,8 @@ npl = np.linalg
 
 IS_OPEN_LOOP = False 
 
-path_type = "trajectory"  # 'lawnmower', 'line', 'obstacle', 'trajectory' or 'data'
+path_type = "line"  # 'lawnmower', 'line', 'obstacle', 'trajectory' or 'data'
+#don't use "trajectory or obstacle path type, as they use lqrrt planner"
 
 # Controller parameters
 kp = np.array([0.08, 0.08, 0])
@@ -39,6 +40,8 @@ tolerance = 0.2  # meters
 traj_tolerance = 15.0
 err_reset_dist = 50
 is_debug = False
+
+rudder_control = 'none'  # 'none', 'stanley', 'Integral_stanley', or 'MPC'
 
 if path_type == "data":
     # Get data collected in the field 
@@ -479,9 +482,14 @@ if __name__ == "__main__":
             p_cmd_hist[i] = p_cmd
             i_cmd_hist[i] = i_cmd
 
+        if rudder_control == 'none':
+            if (i/1000)%2 < 1: #change the rudder control angle every 1000 steps
+                delta = 24
+            else:
+                delta = -24
         # Step forward, x_next = x_last + x_dot*dt
         x = np.concatenate((q, dr)) if not IS_OPEN_LOOP else q
-        x = dynamics.step(x, v_dr, dt)
+        x = dynamics.step(x, v_dr, dt, delta)
         q = x[:6]
         dr = x[6:] if not IS_OPEN_LOOP else dr
 

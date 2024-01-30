@@ -64,6 +64,15 @@ d_nvv = 0.25 * d_yvv  # (N*m)/(m/s)**2  #
 d_nrv = 0.25 * d_yrv  # (N*m)/(m*rad/s**2)  #
 d_nvr = 0.25 * (wm_nr + wm_yv)  # (N*m)/(m*rad/s**2)  #
 
+#rudder dynamics
+a_ratio = 2  # aspect ratio of rudder 
+rho_w = 1025  # density of water (kg/m^3)
+C_b = 0.7  # block coefficient of bathy-boat
+x_r = -0.2  # x-coordinate of rudder (m) - it is negative because it is behind the center of mass
+            # it is negative so that a negative force along y-direction will lead to positive moment about z-axis 
+A_r = 0.1  # area of rudder (m^2)
+
+
 # Inertial matrix, independent of state
 M = np.array(
     [[m - wm_xu, 0, 0], [0, m - wm_yv, m * xg - wm_yr], [0, m * xg - wm_yr, Iz - wm_nr]]
@@ -109,7 +118,7 @@ class TetheredDynamics:
         self.mult = 1
         self.dL = dL
 
-    def step(self, s, v_dr, dt):
+    def step(self, s, v_dr, dt, delta):
         """
         Dynamic model of the boat. Returns the derivatives of the state q based on the control input u
         Input:
@@ -117,6 +126,8 @@ class TetheredDynamics:
                 q: State of the boat. Vector of position, orientation and velocites
                 dr: Position of the drone in the world frame
             v_dr: drone velocity (control input)
+            dt: time step
+            delta: rudder angle (control input)
         Output:
             x (t+1): State of the boat and drone at the next time step
         """
@@ -127,21 +138,35 @@ class TetheredDynamics:
             v_dr = np.array([0, 0, 0])
 
         R = get_R(q)
+
+        # Force and moment from the drone (rope)
         dr[:2] = dr[:2] + v_dr[:2] * dt if v_dr is not None else dr[:2]
         app_point = np.array([q[0], q[1], 0]) + R.dot(r)  # world coord
         self.diff_pos = dr - app_point
         self.diff_pos = self.diff_pos / npl.norm(self.diff_pos)
 
         self.ten = self.ten_mag * self.diff_pos
-        ten_body = R.T.dot(self.ten)
+        ten_body = R.T.dot(self.ten)  # r-transpose*tension, transform world to body coordinate frame
         moments = np.cross(r, ten_body)
         self.u[:2] = ten_body[:2]
         self.u[2] = moments[2]  # apply moment about z
         self.ten[2] = moments[2]
-
         # Rope length constraint
+        
+        
+        # Force from rudder (rudder dynamics)
+        V_rd = np.sqrt(q[3]**2 + q[4]**2)  # speed of boat
+        F_n = 0.5 * rho_w * 6.13*a_ratio/(a_ratio + 2.25) * A_r * V_rd**2 * np.sin(np.deg2rad(delta))  # normal force on rudder
+        X_rd = - np.absolute(F_n * np.sin(np.deg2rad(delta)))  # force on rudder in x-direction
+        Y_rd = 1/2 * (1.14 - 0.6*C_b) *F_n * np.cos(np.deg2rad(delta))  # force on rudder in y-direction
+        M_rd = Y_rd * x_r  # moment on rudder about z-axis
+
+        self.u = self.u + np.array([X_rd, Y_rd, M_rd])/5 # add rudder force to body force
+        
+
         if npl.norm(q[:2] - dr[:2]) < proj_le - dL:
             self.u = np.array([0, 0, 0])
+
         # Centripetal-coriolis matrix
         C = np.array(
             [
@@ -172,6 +197,7 @@ class TetheredDynamics:
 
         # EQUATIONS OF MOTION
         # M*vdot + C*v + D*v = u  and  pdot = R*v
+        # u is in body coordinate frame  
 
         # time rate of change of the state. Velocities and acceleration
         boat_dyn = np.concatenate((R.dot(q[3:]), Minv.dot(self.u - (C + D).dot(q[3:]))))
