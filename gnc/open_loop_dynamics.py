@@ -37,8 +37,8 @@ off_x = 0.1905  # measured from the bathydrone vehicle
 off_z = 0.1016
 r = np.array([off_x, 0, off_z])
 # height of drone above water
-hd = 20 * 0.681818  # feet to meters
-le = 31 * 0.681818  # Length of rope
+hd = 20 * 0.3048  # feet to meters
+le = 31 * 0.3048  # Length of rope
 proj_le = np.sqrt(le**2 - hd**2)
 dL = 1  # tolrance length for rope constraint
 
@@ -61,11 +61,26 @@ d_nvv = 0.25 * d_yvv  # (N*m)/(m/s)**2  #
 d_nrv = 0.25 * d_yrv  # (N*m)/(m*rad/s**2)  #
 d_nvr = 0.25 * (wm_nr + wm_yv)  # (N*m)/(m*rad/s**2)  #
 
+# rudder dynamics
+K_r = 1 / 5  # rudder coefficient
+a_ratio = 2  # aspect ratio of rudder
+rho_w = 1025  # density of water (kg/m^3)
+C_b = 0.7  # block coefficient of bathy-boat
+x_r = (
+    -0.2
+)  # x-coordinate of rudder (m) - it is negative because it is behind the center of mass
+# it is negative so that a negative force along y-direction will lead to positive moment about z-axis
+A_r = 0.1  # area of rudder (m^2)
+
 # Inertial matrix, independent of state
 M = np.array(
     [[m - wm_xu, 0, 0], [0, m - wm_yv, m * xg - wm_yr], [0, m * xg - wm_yr, Iz - wm_nr]]
 )
 Minv = npl.inv(M)
+
+cross = lambda x, y: np.cross(
+    x, y
+)  # fixes annoying issue that grays out code in vscode
 
 
 def unwrap(ang):
@@ -99,6 +114,7 @@ class OpenLoopDynamics:
         self.dr = np.array([0, 0, 0], dtype=np.float64)
         self.ten = np.array([0, 0, 0], dtype=np.float64)
         self.u = np.array([0, 0, 0], dtype=np.float64)
+        self.u_rudder = np.array([0, 0, 0], dtype=np.float64)
         self.diff_pos = np.array([0, 0], dtype=np.float64)
         self.ten_mag = ten_mag
         self.hd = hd
@@ -106,7 +122,7 @@ class OpenLoopDynamics:
         self.mult = 1
         self.dL = dL
 
-    def step(self, q, v_dr, dt):
+    def step(self, q, v_dr, dt, delta):
         """
         Dynamic model of the boat. Returns the derivatives of the state q based on the control input u
         Input:
@@ -127,16 +143,41 @@ class OpenLoopDynamics:
 
         self.ten = self.ten_mag * self.diff_pos
         ten_body = R.T.dot(self.ten)
-        moments = np.cross(r, ten_body)
+        moments = cross(r, ten_body)
         self.u[:2] = ten_body[:2]
         self.u[2] = moments[2]  # apply moment about z
         self.ten[2] = moments[2]
+
+        # Force from rudder (rudder dynamics)
+        V_rd = np.sqrt(q[3] ** 2 + q[4] ** 2)  # speed of boat
+        F_n = (
+            K_r
+            * 0.5
+            * rho_w
+            * 6.13
+            * a_ratio
+            / (a_ratio + 2.25)
+            * A_r
+            * V_rd**2
+            * np.sin(np.deg2rad(delta))
+        )  # normal force on rudder
+        X_rd = -np.absolute(
+            F_n * np.sin(np.deg2rad(delta))
+        )  # force on rudder in x-direction
+        Y_rd = (
+            1 / 2 * (1.14 - 0.6 * C_b) * F_n * np.cos(np.deg2rad(delta))
+        )  # force on rudder in y-direction
+        M_rd = Y_rd * x_r  # moment on rudder about z-axis
+        self.u_rudder = np.array([X_rd, Y_rd, M_rd])
+
+        self.u = self.u + self.u_rudder  # add rudder force to body force
 
         # Rope length constraint
         if npl.norm(q[:2] - self.dr[:2]) < proj_le - dL:
             self.u = np.array([0, 0, 0])
         else:
             self.u = self.u
+
         # Centripetal-coriolis matrix
         C = np.array(
             [

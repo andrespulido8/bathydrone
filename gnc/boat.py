@@ -3,13 +3,13 @@
     simulation
 
     User can choose between different control types with IS_OPEN_LOOP. Open loop,
-    means the drone position is already determined. Closed loop means we need to 
+    means the drone position is already determined. Closed loop means we need to
     calculate the drone position based on the control input. The user also chooses
-    the path_type: 
-        'line' = straight line drone and boat path if open loop 
-        'lawnmower' = lawnmower pattern for the boat reference. Also for the drone if open loop 
+    the path_type:
+        'line' = straight line drone and boat path if open loop
+        'lawnmower' = lawnmower pattern for the boat reference. Also for the drone if open loop
         'obstacle' = single goal waypoint with obstacle in the middle. Use lqRRT for drone so only closed loop
-        'trajectory' = use lawnmower for boat reference and lqRRT for drone so only closed loop 
+        'trajectory' = use lawnmower for boat reference and lqRRT for drone so only closed loop
         'data' = trajectory from data collected in the field, saved as a csv, and used as the boat
         reference. Also drone if open loop
 """
@@ -24,10 +24,10 @@ from tethered_dynamics import TetheredDynamics
 
 npl = np.linalg
 
-IS_OPEN_LOOP = False 
+IS_OPEN_LOOP = True
 
-path_type = "line"  # 'lawnmower', 'line', 'obstacle', 'trajectory' or 'data'
-#don't use "trajectory or obstacle path type, as they use lqrrt planner"
+path_type = "data"  # 'lawnmower', 'line', 'obstacle', 'trajectory' or 'data'
+# don't use "trajectory or obstacle path type, as they use lqrrt planner"
 
 # Controller parameters
 kp = np.array([0.08, 0.08, 0])
@@ -41,10 +41,10 @@ traj_tolerance = 15.0
 err_reset_dist = 50
 is_debug = False
 
-rudder_control = 'none'  # 'none', 'stanley', 'Integral_stanley', or 'MPC'
+rudder_control = "none"  # 'none', 'stanley', 'Integral_stanley', or 'MPC'
 
 if path_type == "data":
-    # Get data collected in the field 
+    # Get data collected in the field
     traj_path = "./csv/traj_data/"
     force_files = ["force_traj_3", "force_traj_6", "force_traj_9", "force_traj_12"]
     drone_files = ["drone_traj_3", "drone_traj_6", "drone_traj_9", "drone_traj_12"]
@@ -98,12 +98,14 @@ def gen_ss(seed, goal, buff=[1] * 4):
         (seed[8], seed[8]),
     ]
 
+
 # Definition of collision
 def is_feasible(x, u):
     for ob in obs:
         if npl.norm(x[:2] - ob[:2]) <= boat_length / 2 + ob[2]:
             return False
     return True
+
 
 def erf(xgoal, x):
     """Returns error e given two states xgoal and x.
@@ -115,6 +117,7 @@ def erf(xgoal, x):
     sg = np.sin(xgoal[2])
     e[2] = np.arctan2(sg * c - cg * s, cg * c + sg * s)
     return e
+
 
 def lqr(x, u):
     """Returns cost-to-go matrix S and policy matrix K given local state x and effort u."""
@@ -131,14 +134,15 @@ def get_boat_position(t, ii):
     """
     Return the position of the boat in a point in time
     Path types:
-        'line' = straight line 
+        'line' = straight line
         'data' = get the trajectory from a csv
             for data it finds the index of the data time that most
             closely match the simulation time
     """
     if path_type == "line":
-        mx = 0.7; my = 0.7
-        return np.array([mx * t, my * t, np.arctan2(my,mx), mx, my, 0]), 0
+        mx = 0.7
+        my = 0.7
+        return np.array([mx * t, my * t, np.arctan2(my, mx), mx, my, 0]), 0
     else:
         t_i = df_dr["time"].iloc[ii]
         while t_i <= t:
@@ -228,12 +232,12 @@ def get_R(q):
 # SIMULATION
 if __name__ == "__main__":
 
-    # Choose one option from the datasets 
+    # Choose one option from the datasets
     data_file_index = 1
     if path_type == "data":
         # Choose one option from the datasets (drones and echos)
         df_dr = pd.read_csv(traj_path + drone_files[data_file_index] + ".csv")
-        df_bt = pd.read_csv(traj_path + force_files[data_file_index] + ".csv") 
+        df_bt = pd.read_csv(traj_path + force_files[data_file_index] + ".csv")
 
         # Fix delta in time
         # kk = np.argmax(df_dr['Y_m'].to_numpy() <= df_bt['Y_m'].to_numpy()[0])
@@ -286,6 +290,7 @@ if __name__ == "__main__":
             [df_bt["X_m"].iloc[jj], df_bt["Y_m"].iloc[jj], 0, 0, 0, 0], dtype=np.float64
         )
         dr0, _ = get_drone_position(t_last, dynamics.hd, i_last)
+        dynamics.dr = np.copy(dr0)
     dr = np.copy(dr0)
     q = np.copy(q0)
     x = np.concatenate((q0, dr0))
@@ -396,6 +401,7 @@ if __name__ == "__main__":
     bt_history = np.zeros((len(t_arr), 6))
     dr_history = np.zeros((len(t_arr), 3))
     u_history = np.zeros((len(t_arr), 3))
+    u_rudder_history = np.zeros((len(t_arr), 3))
     u_world_history = np.zeros((len(t_arr), 3))
     head_dr = np.zeros(len(t_arr))
     dr_v_hist = np.zeros((len(t_arr), ncontrols))
@@ -419,17 +425,20 @@ if __name__ == "__main__":
             # q_ref is boat position from the data
             q_ref, ii_last = get_boat_position(t, ii_last)
             q_ref_dot = 0
+
         if IS_OPEN_LOOP:
             if npl.norm(q[:2] - dr[:2]) <= dynamics.proj_le + dynamics.dL:
                 if path_type == "data":
-                    dynamics.dr, i_last = get_drone_position(t_last, dynamics.hd, i_last)
+                    dynamics.dr, i_last = get_drone_position(
+                        t_last, dynamics.hd, i_last
+                    )
                 elif path_type == "lawnmower":
                     dynamics.dr = q_ref[:3]
                 t_last += dt
             if path_type == "line":
                 q_ref = np.concatenate((dr, np.zeros(3)))
             v_dr = np.array([0, 0, 0])
-            dr = dynamics.dr 
+            dr = dynamics.dr
         else:
             if path_type == "obstacle":
                 # Planner's decision
@@ -475,6 +484,7 @@ if __name__ == "__main__":
         q_history[i] = q
         dr_history[i] = dr
         u_history[i] = dynamics.u
+        u_rudder_history[i] = dynamics.u_rudder
         u_world_history[i] = dynamics.ten
         head_dr[i] = np.degrees(np.arctan2(dynamics.diff_pos[1], dynamics.diff_pos[0]))
         if not IS_OPEN_LOOP:
@@ -482,8 +492,8 @@ if __name__ == "__main__":
             p_cmd_hist[i] = p_cmd
             i_cmd_hist[i] = i_cmd
 
-        if rudder_control == 'none':
-            if (i/1000)%2 < 1: #change the rudder control angle every 1000 steps
+        if rudder_control == "none":
+            if (t / 20) % 2 < 1:  # change the rudder control angle every 20 seconds
                 delta = 24
             else:
                 delta = -24
@@ -506,7 +516,7 @@ if __name__ == "__main__":
     ax = fig1.add_subplot(fig1rows, fig1cols, 1)
     ax.set_title("X Position (m)", fontsize=16)
     ax.plot(t_arr, q_history[:, 0], "-g", label="sim boat")
-    ax.plot(t_arr, dr_history[:, 0], "--b",  label="drone")
+    ax.plot(t_arr, dr_history[:, 0], "--b", label="drone")
     if not IS_OPEN_LOOP:
         ax.plot(t_arr, bt_history[:, 0], "-.r", label="boat reference boat(data)")
         ax.plot(t_arr, bt_history[:, 0] - traj_tolerance, "--r")
@@ -540,6 +550,11 @@ if __name__ == "__main__":
     ax.plot(t_arr, u_history[:, 0], "b", label="x [N]")
     ax.plot(t_arr, u_history[:, 1], "g", label="y [N]")
     ax.plot(t_arr, u_history[:, 2], "r", label="z [N m]")
+    ax.plot(t_arr[0:-1:200], u_rudder_history[0:-1:200, 0], "--b", label="x rudder [N]")
+    ax.plot(t_arr[0:-1:200], u_rudder_history[0:-1:200, 1], "--g", label="y rudder [N]")
+    ax.plot(
+        t_arr[0:-1:200], u_rudder_history[0:-1:200, 2], "--r", label="z rudder [N m]"
+    )
     ax.legend()
     ax.grid(True)
 
@@ -558,8 +573,8 @@ if __name__ == "__main__":
     ax = fig1.add_subplot(fig1rows, fig1cols, 7)
     ax.set_title("Sway (m/s)", fontsize=16)
     ax.plot(
-        t_arr,
-        q_history[:, 4],
+        t_arr[0:-1:200],
+        q_history[0:-1:200, 4],
         "g",
     )
     ax.set_xlabel("Time (s)")
@@ -569,8 +584,8 @@ if __name__ == "__main__":
     ax = fig1.add_subplot(fig1rows, fig1cols, 8)
     ax.set_title("Yaw (deg/s)", fontsize=16)
     ax.plot(
-        t_arr,
-        np.rad2deg(q_history[:, 5]),
+        t_arr[0:-1:200],
+        np.rad2deg(q_history[0:-1:200, 5]),
         "g",
     )
     ax.set_xlabel("Time (s)")
@@ -578,7 +593,7 @@ if __name__ == "__main__":
 
     # Wrench in world frame
     ax = fig1.add_subplot(fig1rows, fig1cols, 5)
-    ax.set_title("World Wrench [N, N, Nm]", fontsize=16)
+    ax.set_title("World Wrench for Tension [N, N, Nm]", fontsize=16)
     ax.plot(t_arr, u_world_history[:, 0], "b", label="x [N]")
     ax.plot(t_arr, u_world_history[:, 1], "g", label="y [N]")
     ax.plot(t_arr, u_world_history[:, 2], "r", label="z [N m]")
@@ -599,10 +614,10 @@ if __name__ == "__main__":
     ax = fig1.add_subplot(fig1rows, fig1cols, 10)
     ax.set_title("Norm of Distance (m)", fontsize=16)
     ax.plot(
-        t_arr,
+        t_arr[0:-1:5],
         np.sqrt(
-            (q_history[:, 0] - dr_history[:, 0]) ** 2
-            + (q_history[:, 1] - dr_history[:, 1]) ** 2
+            (q_history[0:-1:50, 0] - dr_history[0:-1:50, 0]) ** 2
+            + (q_history[0:-1:50, 1] - dr_history[0:-1:50, 1]) ** 2
         ),
         "k",
     )
@@ -628,6 +643,9 @@ if __name__ == "__main__":
     ax.legend()
     ax.grid(True)
     plt.show()
+
+    # TODO: plot rudder control input
+
     if not IS_OPEN_LOOP:
         print(
             "Mean Square Error X: ", np.mean((q_history[:, 0] - bt_history[:, 0]) ** 2)
@@ -731,7 +749,12 @@ if __name__ == "__main__":
         linewidth=lthick,
     )
     pref = ax6.scatter(
-        dr_history[0, 0], dr_history[0, 1], color="b", s=pthick, marker='s', label="drone"
+        dr_history[0, 0],
+        dr_history[0, 1],
+        color="b",
+        s=pthick,
+        marker="s",
+        label="drone",
     )
     href = ax6.plot(
         [dr_history[0, 0], dr_history[0, 0] + rope[0, 0]],
@@ -797,7 +820,9 @@ if __name__ == "__main__":
             return [p, h, pref, href, pact]
 
     # Run animation
-    ani = animation.FuncAnimation(fig6, func=update_ani, interval=dt * 1000 / speedup, save_count=100)
+    ani = animation.FuncAnimation(
+        fig6, func=update_ani, interval=dt * 1000 / speedup, save_count=100
+    )
     plt.legend()
     plt.show()
 
@@ -823,6 +848,9 @@ if __name__ == "__main__":
             "surge_force": u_history[:, 0],
             "sway_force": u_history[:, 1],
             "yaw_torque": u_history[:, 2],
+            "rudder_surge_force": u_rudder_history[:, 0],
+            "rudder_sway_force": u_rudder_history[:, 1],
+            "rudder_yaw_torque": u_rudder_history[:, 2],
         }
         savemat(filename, data)
         print("Data saved!\n")

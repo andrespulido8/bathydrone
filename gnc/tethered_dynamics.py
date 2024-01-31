@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Contains a model of a 3DOF marine ship. Supplies parameter values,
-a function for the full nonlinear dynamic. Input is drone velocity.  
+a function for the full nonlinear dynamic. Input is drone velocity.
 
 State is: [x_world_position (m),
             y_world_position (m),
@@ -64,20 +64,26 @@ d_nvv = 0.25 * d_yvv  # (N*m)/(m/s)**2  #
 d_nrv = 0.25 * d_yrv  # (N*m)/(m*rad/s**2)  #
 d_nvr = 0.25 * (wm_nr + wm_yv)  # (N*m)/(m*rad/s**2)  #
 
-#rudder dynamics
-a_ratio = 2  # aspect ratio of rudder 
+# rudder dynamics
+K_r = 1 / 5  # rudder coefficient
+a_ratio = 2  # aspect ratio of rudder
 rho_w = 1025  # density of water (kg/m^3)
 C_b = 0.7  # block coefficient of bathy-boat
-x_r = -0.2  # x-coordinate of rudder (m) - it is negative because it is behind the center of mass
-            # it is negative so that a negative force along y-direction will lead to positive moment about z-axis 
+x_r = (
+    -0.2
+)  # x-coordinate of rudder (m) - it is negative because it is behind the center of mass
+# it is negative so that a negative force along y-direction will lead to positive moment about z-axis
 A_r = 0.1  # area of rudder (m^2)
-
 
 # Inertial matrix, independent of state
 M = np.array(
     [[m - wm_xu, 0, 0], [0, m - wm_yv, m * xg - wm_yr], [0, m * xg - wm_yr, Iz - wm_nr]]
 )
 Minv = npl.inv(M)
+
+cross = lambda x, y: np.cross(
+    x, y
+)  # fixes annoying issue that grays out code in vscode
 
 
 def unwrap(ang):
@@ -110,6 +116,7 @@ class TetheredDynamics:
     def __init__(self, ten_mag) -> None:
         self.ten = np.array([0, 0, 0], dtype=np.float64)
         self.u = np.array([0, 0, 0], dtype=np.float64)
+        self.u_rudder = np.array([0, 0, 0], dtype=np.float64)
         self.diff_pos = np.array([0, 0], dtype=np.float64)
         # TODO: MAKE THE LINEAR RELATIONSHIP EXPLICIT IN THE CODE BY SETTING THE MAX SPEED OF DRONE BASED ON FORCE AND DO GOAL VELOCITY THAT MAX SPEED
         self.ten_mag = ten_mag
@@ -146,24 +153,37 @@ class TetheredDynamics:
         self.diff_pos = self.diff_pos / npl.norm(self.diff_pos)
 
         self.ten = self.ten_mag * self.diff_pos
-        ten_body = R.T.dot(self.ten)  # r-transpose*tension, transform world to body coordinate frame
-        moments = np.cross(r, ten_body)
+        ten_body = R.T.dot(self.ten)  # transform world to body coordinate frame
+        moments = cross(r, ten_body)
         self.u[:2] = ten_body[:2]
         self.u[2] = moments[2]  # apply moment about z
         self.ten[2] = moments[2]
-        # Rope length constraint
-        
-        
+
         # Force from rudder (rudder dynamics)
-        V_rd = np.sqrt(q[3]**2 + q[4]**2)  # speed of boat
-        F_n = 0.5 * rho_w * 6.13*a_ratio/(a_ratio + 2.25) * A_r * V_rd**2 * np.sin(np.deg2rad(delta))  # normal force on rudder
-        X_rd = - np.absolute(F_n * np.sin(np.deg2rad(delta)))  # force on rudder in x-direction
-        Y_rd = 1/2 * (1.14 - 0.6*C_b) *F_n * np.cos(np.deg2rad(delta))  # force on rudder in y-direction
+        V_rd = np.sqrt(q[3] ** 2 + q[4] ** 2)  # speed of boat
+        F_n = (
+            K_r
+            * 0.5
+            * rho_w
+            * 6.13
+            * a_ratio
+            / (a_ratio + 2.25)
+            * A_r
+            * V_rd**2
+            * np.sin(np.deg2rad(delta))
+        )  # normal force on rudder
+        X_rd = -np.absolute(
+            F_n * np.sin(np.deg2rad(delta))
+        )  # force on rudder in x-direction
+        Y_rd = (
+            1 / 2 * (1.14 - 0.6 * C_b) * F_n * np.cos(np.deg2rad(delta))
+        )  # force on rudder in y-direction
         M_rd = Y_rd * x_r  # moment on rudder about z-axis
+        self.u_rudder = np.array([X_rd, Y_rd, M_rd])
 
-        self.u = self.u + np.array([X_rd, Y_rd, M_rd])/5 # add rudder force to body force
-        
+        self.u = self.u + self.u_rudder  # add rudder force to body force
 
+        # Rope length constraint
         if npl.norm(q[:2] - dr[:2]) < proj_le - dL:
             self.u = np.array([0, 0, 0])
 
@@ -197,7 +217,7 @@ class TetheredDynamics:
 
         # EQUATIONS OF MOTION
         # M*vdot + C*v + D*v = u  and  pdot = R*v
-        # u is in body coordinate frame  
+        # u is in body coordinate frame
 
         # time rate of change of the state. Velocities and acceleration
         boat_dyn = np.concatenate((R.dot(q[3:]), Minv.dot(self.u - (C + D).dot(q[3:]))))
