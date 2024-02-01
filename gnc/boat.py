@@ -21,6 +21,7 @@ from lqRRT import lqrrt
 from open_loop_dynamics import OpenLoopDynamics
 from path_planning import pp
 from tethered_dynamics import TetheredDynamics
+from stanley_controller import StanleyController
 
 npl = np.linalg
 
@@ -41,11 +42,11 @@ traj_tolerance = 15.0
 err_reset_dist = 50
 is_debug = False
 
-rudder_control = "none"  # 'none', 'stanley', 'Integral_stanley', or 'MPC'
+rudder_control = "stanley"  # 'none', 'step', 'stanley', 'Integral_stanley', or 'MPC'
 
 if path_type == "data":
     # Get data collected in the field
-    traj_path = "./csv/traj_data/"
+    traj_path = "csv/traj_data/"
     force_files = ["force_traj_3", "force_traj_6", "force_traj_9", "force_traj_12"]
     drone_files = ["drone_traj_3", "drone_traj_6", "drone_traj_9", "drone_traj_12"]
 elif path_type == "lawnmower" or path_type == "trajectory":
@@ -151,7 +152,15 @@ def get_boat_position(t, ii):
         x = df_bt["X_m"].iloc[ii]
         y = df_bt["Y_m"].iloc[ii]
         return np.array([x, y, 0, 0, 0, 0]), ii
-
+    
+def get_boat_reference():
+    '''Return the reference trajectory of the boat'''
+    ref = []
+    for ii in range(len(df_dr["X_m"].iloc[:])):
+        x = df_dr["X_m"].iloc[ii]
+        y = df_dr["Y_m"].iloc[ii]
+        ref.append([x,y])
+    return np.array(ref)
 
 def get_drone_position(t, hd, ii):
     """
@@ -220,6 +229,8 @@ def pid_controller(t, t_last, q, q_ref, q_dot, q_ref_dot, err_accumulation):
 
     command = np.array([command[0], command[1], 0])
     return command, feedback_proportional, feedback_integral, err_accumulation
+
+
 
 
 def get_R(q):
@@ -393,6 +404,10 @@ if __name__ == "__main__":
         T = Ts.sum()
     print("T: ", T)
 
+    if rudder_control == "stanley":
+        ref = get_boat_reference()
+        controller = StanleyController(angular_gain=10, control_gain = 20, reference=ref, debug=is_debug)
+
     # Define time domain
     t_arr = np.arange(t0, T, dt)
 
@@ -493,10 +508,15 @@ if __name__ == "__main__":
             i_cmd_hist[i] = i_cmd
 
         if rudder_control == "none":
+            delta = 0
+        elif rudder_control == "step":
             if (t / 20) % 2 < 1:  # change the rudder control angle every 20 seconds
                 delta = 24
             else:
                 delta = -24
+        elif rudder_control == "stanley":
+            delta = controller.stanley_control(q[0],q[1],dt)
+
         # Step forward, x_next = x_last + x_dot*dt
         x = np.concatenate((q, dr)) if not IS_OPEN_LOOP else q
         x = dynamics.step(x, v_dr, dt, delta)
@@ -614,10 +634,10 @@ if __name__ == "__main__":
     ax = fig1.add_subplot(fig1rows, fig1cols, 10)
     ax.set_title("Norm of Distance (m)", fontsize=16)
     ax.plot(
-        t_arr[0:-1:5],
+        t_arr,
         np.sqrt(
-            (q_history[0:-1:50, 0] - dr_history[0:-1:50, 0]) ** 2
-            + (q_history[0:-1:50, 1] - dr_history[0:-1:50, 1]) ** 2
+            (q_history[:, 0] - dr_history[:, 0]) ** 2
+            + (q_history[:, 1] - dr_history[:, 1]) ** 2
         ),
         "k",
     )
