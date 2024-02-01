@@ -3,12 +3,12 @@ import matplotlib.pyplot as plt
 from math import atan, atan2, sqrt, pi
 
 
-class StanleyController:
+class IntegralStanley:
 
-    def __init__(self, angular_gain=2.5, control_gain = 2.5, max_steer=np.deg2rad(24), reference=None, x_previous=0, y_previous=0, debug = False):
+    def __init__(self, angular_gain=2.5, control_gain = 2.5, Integral_gain = 2, max_steer=np.deg2rad(24), reference=None, x_previous=0, y_previous=0, debug = False):
         
         """
-        Stanley Controller
+        Integral Stanley
 
         At initialisation
         :param angular_gain:                (float) gain between angular error and control output 
@@ -31,6 +31,7 @@ class StanleyController:
 
         self.alpha = angular_gain 
         self.k = control_gain
+        self.ki = Integral_gain
         self.max_steer = max_steer
 
         self.rx = reference[:,0]
@@ -42,6 +43,9 @@ class StanleyController:
 
         self.current_time = 0
         self.previous_time = 0
+        self.error_previous = 0  #used for integration of error
+        self.integral_error = 0  #used for integration of error
+
     
     def find_target_path_id(self, x, y):  
         """Finds if of the closest waypoint in the reference path from the current pose"""
@@ -121,9 +125,12 @@ class StanleyController:
         steering_error, heading_error = self.find_steering_error(current_heading,reference_heading)
         crosstrack_error = self.crosstrack_steering_angle(dx,dy,d,current_velocity,reference_heading)
         self.update_position(x,y)
-        
-        control_angle = steering_error+ (crosstrack_error) #seem to make the boat follow reference better
-        
+
+        self.integral_error += self.error_previous*dt  #integrate past error with time passed and add that to integral error
+        self.error_previous = steering_error+ (crosstrack_error)  #update the control_angle output 
+        control_angle = steering_error+ (crosstrack_error) + self.ki*self.integral_error  #compute control angle
+        #negative angle seem to make boat follow trajectory better
+
         #can comment this part of the code to debug, give insight to where the angle will be at
         if control_angle > self.max_steer:
             control_angle = self.max_steer

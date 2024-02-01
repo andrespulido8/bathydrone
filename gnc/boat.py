@@ -22,6 +22,7 @@ from open_loop_dynamics import OpenLoopDynamics
 from path_planning import pp
 from tethered_dynamics import TetheredDynamics
 from stanley_controller import StanleyController
+from integral_stanley import IntegralStanley
 
 npl = np.linalg
 
@@ -42,7 +43,13 @@ traj_tolerance = 15.0
 err_reset_dist = 50
 is_debug = False
 
-rudder_control = "stanley"  # 'none', 'step', 'stanley', 'Integral_stanley', or 'MPC'
+# Rudder Control parameters 
+rudder_control = "Integral_stanley"  # 'none', 'step', 'stanley', 'Integral_stanley', or 'MPC'
+alpha_r = 2.5  # Angular gain for Stanley Controller
+k_r = 2  # Control gain for Stanley Controller 
+
+#extra parameter for integral_stanley controller
+kp_r = 10  # Integral gain for integral stanley controller 
 
 if path_type == "data":
     # Get data collected in the field
@@ -156,9 +163,9 @@ def get_boat_position(t, ii):
 def get_boat_reference():
     '''Return the reference trajectory of the boat'''
     ref = []
-    for ii in range(len(df_dr["X_m"].iloc[:])):
-        x = df_dr["X_m"].iloc[ii]
-        y = df_dr["Y_m"].iloc[ii]
+    for ii in range(len(df_bt["X_m"].iloc[:])):
+        x = df_bt["X_m"].iloc[ii]
+        y = df_bt["Y_m"].iloc[ii]
         ref.append([x,y])
     return np.array(ref)
 
@@ -404,9 +411,13 @@ if __name__ == "__main__":
         T = Ts.sum()
     print("T: ", T)
 
+    #set up controller for rudder 
     if rudder_control == "stanley":
         ref = get_boat_reference()
-        controller = StanleyController(angular_gain=10, control_gain = 20, reference=ref, debug=is_debug)
+        controller = StanleyController(angular_gain=alpha_r, control_gain = k_r, reference=ref, debug=is_debug)
+    elif rudder_control == "Integral_stanley":
+        ref = get_boat_reference()
+        controller = IntegralStanley(angular_gain=alpha_r, control_gain = k_r, Integral_gain = kp_r, reference=ref, debug=is_debug)
 
     # Define time domain
     t_arr = np.arange(t0, T, dt)
@@ -515,6 +526,8 @@ if __name__ == "__main__":
             else:
                 delta = -24
         elif rudder_control == "stanley":
+            delta = controller.stanley_control(q[0],q[1],dt)
+        elif rudder_control == "Integral_stanley":
             delta = controller.stanley_control(q[0],q[1],dt)
 
         # Step forward, x_next = x_last + x_dot*dt
@@ -901,6 +914,7 @@ if __name__ == "__main__":
     ax3 = fig3.add_subplot(1, 1, 1)
     ax3.plot(q_history[:, 0], q_history[:, 1], "--k", label="Boat Traj. in Sim.")
     ax3.plot(bt_history[:, 0], bt_history[:, 1], "-r", label="Boat Traj. in Exp.")
+    #ax3.plot(ref[:, 0], ref[:, 1], "-b", label="Boat reference Traj")  see which trajectory to follow
     ax3.plot(
         q_history[0, 0], q_history[0, 1], "ok", label="Start Point (Sim. and Exp.)"
     )
