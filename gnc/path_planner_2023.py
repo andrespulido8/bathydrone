@@ -2,19 +2,60 @@
 """ Generate a complete coverage path for a side-scan sonar vessel on an arbitrary convex region.
     Author: Nicholas Sardinia
 """
-import os
+import sys, os
 import matplotlib.pyplot as plt
 import geopandas as gpd
-import matplotlib.path as pths
 import numpy as np
 import math
-import csv
 import pandas as pd
 from scipy.spatial import ConvexHull
 from shapely.geometry import Polygon
 from shapely.prepared import prep
 from py2opt.routefinder import RouteFinder
 
+#TODO add manipulations to bounding region polygon.
+class boundingRegion:
+    """ 
+    The bounding polygon for the region of interest.
+
+    Attributes: 
+        polygonVertices (list of tuples): vertices forming exterior of the bounding polygon.
+    """
+    
+    def __init__(self, csvName):
+        self.polygonVertices = self.getPolygonFromCSV(csvName)
+
+    @staticmethod
+    def getPolygonFromCSV(csvName):
+        """ get region of interest from csv (manual) """
+        file_path = os.path.join(os.getcwd(), "csv", csvName)
+        df = pd.read_csv(file_path, usecols=["Latitude", "Longitude"])
+        return list(zip(df.Longitude.values.tolist(), df.Latitude.values.tolist()))
+
+#TODO make exisiting functions members of Path if it is advanatageous to do so.
+class Path:
+    """ 
+    An ordered list of Waypoints.
+
+    Attributes: 
+        orderedWaypointList (list of Waypoints): Waypoints forming the path of a single convex region.
+    """
+    def __init__(self):
+        self.orderedWaypointList = []
+
+class Waypoint:
+    """ 
+    Waypoint in 2-D coordinates.
+
+    Attributes: 
+        xCoord (double): x-coordinate of the Waypoint.
+        yCoord (double): y-coordinate of the Waypoint.
+        approximateDepthCoord (double): Approximate region depth at the Waypoint's coordinates. 
+    """
+    def __init__(self):
+        self.xCoord = 0
+        self.yCoord = 0
+        self.approximateDepthCoord = 0
 
 def generatePath(polygonToPath, pathDist):
     """
@@ -24,7 +65,6 @@ def generatePath(polygonToPath, pathDist):
                 bestPL - path length
                 emptyPath - flag for empty path
     """
-    c1 = 0.9  # weight for path length
     c2 = 0.4  # weight for number of turns
     lc = 100000000 #starting cost, very high to avoid initialization issues.
     #optimization for path orientation.
@@ -33,8 +73,6 @@ def generatePath(polygonToPath, pathDist):
     minTurns = 10000000  #minimum number of turns
     currPL = 0  #current path length
     pathLengths = []
-    savedNumTurns = 10000
-    savedPL = 100000
     
     #instead of gridding, test with linear distance to refine (max linear dist)
     Bestgeom = Polygon(polygonToPath)
@@ -121,12 +159,9 @@ def generatePath(polygonToPath, pathDist):
                     currX = currX + width
                     dir = dir * (-1)
 
-                
             #rotate the chosen path back to the real orientation
             transformAngleRev = [[np.cos(np.deg2rad(-testAngle)), -np.sin(np.deg2rad(-testAngle))], 
                         [np.sin(np.deg2rad(-testAngle)), np.cos(np.deg2rad(-testAngle))]]
-        
-            xPath1, yPath2 = zip(*path)
         
             rotatedPath = []
             for point in path:
@@ -149,8 +184,6 @@ def generatePath(polygonToPath, pathDist):
             if lc > currC:
                 chosenPath = path
                 lc = currC
-                savedPL = currPL
-                savedNumTurns = numTurns
                 Bestgrid = grid
                 Bestgeom = geom
             
@@ -163,7 +196,6 @@ def generatePath(polygonToPath, pathDist):
             bestPL = 0
             chosenPath = []
             emptyPath = 1
-
         
     return chosenPath, bestPL, emptyPath, Bestgrid, Bestgeom
 
@@ -301,51 +333,32 @@ def makeConvexRec(polyPoints, tolerance, polyStore, polyPointsGeom):
         makeConvexRec(ps2, tolerance, polyStore, polyGeom2)
 
 def makeConvex(polyPoints, tolerance, polyPointsGeom):
-    """ Take a polygon and apply approximate convex decomposition."""
+    """ apply approximate convex decompsition to a simple polygon """
     ps = []
     makeConvexRec(polyPoints, tolerance, ps, polyPointsGeom)
     return ps
 
-def main():
-    """
-    GENERATE PATH FROM EDGE DETECTION AND PLOT
-    """
-    # GET BOUNDING POLYGON FROM CSV
+def getPolygonFromCSVExternal(csvName):
+    """ get region of interest from csv (edge detection) """
     xList = []
     yList = []
-    file_name = "lake-santa-fe-coords.csv"
-    file_path = os.path.join(os.getcwd(), "csv", file_name)
+    file_path = os.path.join(os.getcwd(), "csv", csvName)
     df = pd.read_csv(file_path, usecols=["Latitude", "Longitude"])
     yList = df.Latitude.values.tolist()
     xList = df.Longitude.values.tolist()
-    
-    # GENERATE POLYGON OBJECT (required for shapely)
-    polygonToPath = list(zip(xList, yList))
-    geom = Polygon(polygonToPath)
-    
-    # PATH DISTANCE CALCULATION (when physical parameters are unknown)
-    pathDist = abs((max(xList) - min(xList))/15)
 
-    # APPROXIMATE DECOMPOSITION
-    tol = pathDist*1
-    poly = gpd.GeoSeries([geom])
-    polyCoords = poly.get_coordinates()
-    polyCoordsList = list(polyCoords.itertuples(index=False, name=None))
-    pTest = makeConvex(polyCoordsList, tol, poly)
-    
+    return xList, yList
 
-
-    # TODO Integrate as function
-    # GENERATE PATH FOR EACH DECOMPOSED POLYGON
+def generatePathsOfDecomposedRegions(pTest, pathDistOrig, startPoint):
+    """ generate a coverage path of a set of approximately convex polygons """
     testPathArr = []
-    pathDistOrig = pathDist
-    startPos = [min(xList), min(yList)]
-    pathCenters = [startPos]
+    pathCenters = startPoint
+    variablePathDist = pathDistOrig
     for i in range(len(pTest)):
         x1, y1 = zip(*pTest[i])
         maxArea = (max(x1)-min(x1))*(max(y1)-min(y1))
         if (maxArea > (5*pathDistOrig*pathDistOrig)):
-            genPath = generatePath(pTest[i], pathDist)
+            genPath = generatePath(pTest[i], variablePathDist)
             if (len(genPath[0]) > 1):
                 testPathArr.append(genPath[0])
                 xCenter, yCenter = zip(*genPath[0])
@@ -353,11 +366,19 @@ def main():
                 yLoc = (max(yCenter) + min(yCenter))/2
                 pathCenters.append([xLoc, yLoc])
 
-    
-    #TODO Integrate as function
-    # 2-OPT HEURISTIC
+    return pathCenters, testPathArr
+
+def decomposePolygon(tolerance, polygonToDecompose):
+    """ decompose polygon in to approximately convex sub-polygons """
+    poly = gpd.GeoSeries([polygonToDecompose])
+    polyCoords = poly.get_coordinates()
+    polyCoordsList = list(polyCoords.itertuples(index=False, name=None))
+    decomposedPolygon = makeConvex(polyCoordsList, tolerance, poly)
+    return decomposedPolygon
+
+def orderTwoOpt(pathCenters):
+    """ approximate convex decomposition tsp solution with 2-opt algorithm """
     pathLocs = []
-    print(pathCenters)
     for i in range(len(pathCenters)):
         pathLocs.append(str(i))
 
@@ -373,15 +394,20 @@ def main():
         initDist += distMat[i][i+1]
     
     # 2-OPT ITERATION (from py2opt libary, stable)
+    
+    # stops route_finder from printing timer    
+    sys.stdout = open(os.devnull, 'w')
+
     route_finder = RouteFinder(distMat, pathLocs, iterations=5)
     best_distance, best_route = route_finder.solve()
 
-
-
-    ##############################                          
-    ##  PLOTTING FUNCTIONALITY  ##
-    ##############################                          
+    # re-enables command-line prints
+    sys.stdout = sys.__stdout__
     
+    return best_distance, best_route
+
+def plotPath(xList, yList, testPathArr, pathCenters, best_route, best_distance):
+    """ generate matplotlib plot of the competed path """
     # PLOTTING SETUP
     fig = plt.figure()
     ax1 = fig.add_subplot(111)
@@ -389,7 +415,7 @@ def main():
     ax1.axes.get_yaxis().set_visible(False)
 
     # PLOTTING PATHS
-    print(testPathArr)
+    #print(testPathArr)
     ax1.plot(xList, yList, c='black', marker='o', markersize='0.25')
     for i in range(len(testPathArr)):
         x1, y1 = zip(*testPathArr[i])
@@ -409,6 +435,38 @@ def main():
     # SHOW PLOT
     plt.axis('equal')
     plt.show()
+    
+def main():
+    """
+    GENERATE PATH FROM EDGE DETECTION AND PLOT
+    """
+
+    # BOUNDING POLYGON
+    regionOfInterest = boundingRegion("newnans-lake-coords.csv")
+    
+    # GET BOUNDING POLYGON FROM CSV
+    xList, yList = getPolygonFromCSVExternal("newnans-lake-coords.csv")
+
+    # GENERATE POLYGON OBJECT (required for shapely)
+    geom = Polygon(regionOfInterest.polygonVertices)
+    xList, yList = list(zip(*regionOfInterest.polygonVertices))
+    
+    # APPROXIMATE DECOMPOSITION
+    # Path distance approximation (when physical parameters are unknown)
+    pathDist = abs((max(xList) - min(xList))/15)
+    # Decomposition Tolerance Constant (SL-Concavity)
+    tol = pathDist*1
+    pTest = decomposePolygon(tol, geom)
+
+    # GENERATE PATH FOR EACH DECOMPOSED POLYGON
+    startPos = [min(xList), min(yList)]
+    pathCenters, testPathArr = generatePathsOfDecomposedRegions(pTest, pathDist, [startPos])
+    
+    # 2-OPT HEURISTIC
+    best_distance, best_route = orderTwoOpt(pathCenters)
+
+    # PLOTTING
+    plotPath(xList, yList, testPathArr, pathCenters, best_route, best_distance)
     
     return 0
 
