@@ -5,10 +5,10 @@ longitude coordinates.
 '''
 #!/usr/bin/env python3
 import math
-import csv  # for writing out coordinates to a CSV file
+import csv                  # for writing out coordinates to a CSV file
 import numpy as np
-import cv2  # OpenCV python library
-import grip_sfwmd_left as grip # GRIP-generated pipeline
+import cv2                  # OpenCV python library
+import grip_sfwmd_top as grip   # GRIP-generated pipeline
 
 def find_bounding_points(contour):
     '''
@@ -91,7 +91,7 @@ def draw_contour(img, contour):
     '''
     Draws a contour on the input image.
     '''
-    cv2.drawContours(img, contour, 0, (0, 255, 0), 3)
+    cv2.drawContours(img, [contour], 0, (0, 255, 0), 2)
 
 def draw_points(img, points):
     '''
@@ -121,7 +121,7 @@ def main():
     '''
 
     # Read in the test image
-    img = cv2.imread("Figures/sfwmd_2k_left.tif")
+    img = cv2.imread("Figures/sfwmd_2k_top.tif")
 
     # Run the image through the pipeline.
     pipeline = grip.Pipeline()
@@ -157,6 +157,7 @@ def main():
                 close the image when you are finished.')
 
         draw_contour(img, nnl_contour)
+        cv2.imwrite("image-with-contour.png", img)
         draw_points(img, nnl_xy)
         display_image(img)
 
