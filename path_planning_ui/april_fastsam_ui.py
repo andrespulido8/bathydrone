@@ -23,6 +23,7 @@ import csv
 import tkinter as tk
 from tkinter import ttk
 from tkinter import filedialog
+from utils.pan_zoom_interface import CanvasImage
 
 import torch
 
@@ -241,7 +242,6 @@ class App(ttk.Frame):
         with Image.open(filename) as img:
             # Update the image
             self.__img = img
-            self.__tk_img = ImageTk.PhotoImage(img)
 
             # Clear all drawn shapes from canvas
             self.__img_canvas.delete('all')
@@ -252,12 +252,14 @@ class App(ttk.Frame):
             self.__update_state(AppState.IMAGE_SEGMENT)
 
     def __update_canvas_image(self):
-        """ Updates the image to display on the Canvas while resizing the Canvas. """
+        #todo
+        #fixme image width and height get buggy after resizing and loading a new image
+        #""" Updates the image to display on the Canvas while resizing the Canvas. """
+        self.__img_canvas_new.set_image(self.__img)
+
         # Resize canvas to match the new image
-        self.__img_canvas.configure(width=self.__tk_img.width(), height=self.__tk_img.height())
 
         # Add image to canvas
-        self.__img_canvas.create_image(0, 0, anchor="nw", image=self.__tk_img)
 
     def __segment(self):
         """ Begin segmentation on the selected image. """
@@ -301,7 +303,8 @@ class App(ttk.Frame):
         print(f'{"Warning: " if num_segments == 0 else ""}Segmentation found {num_segments} segments.')
 
         # Display output image
-        self.__tk_img = ImageTk.PhotoImage(Image.fromarray(result))
+        #todoooooooooo
+        self.__img = Image.fromarray(result)
 
         self.__update_canvas_image()
 
@@ -370,6 +373,7 @@ class App(ttk.Frame):
 
         # Enable checkbox
         self.__check_latlong.configure(state='enabled')
+
 
         # Revert greying out of entry box labels
         self.__label_left     .configure(foreground='black')
@@ -564,7 +568,7 @@ class App(ttk.Frame):
 
     def __init__(self, root):
         ttk.Frame.__init__(self, root)
-        self.pack()
+        self.pack(fill='both', expand=True)
 
         self.winfo_toplevel().title('APRILab Water Body Detection Tool')
 
@@ -584,14 +588,23 @@ class App(ttk.Frame):
 
         self.__last_clicked_segment = None
 
-        # High-level frames
-        self.__frame_menu     = ttk.Frame(self)
-        self.__frame_status   = ttk.Frame(self)
-        self.__frame_canvas   = ttk.Frame(self)
+        # image of water body to be stored in memory
+        self.__img = None
 
-        self.__frame_menu     .grid(row=0, column=0, rowspan=2,   sticky='nsew') 
-        self.__frame_status   .grid(row=0, column=1,              sticky='nsew') 
-        self.__frame_canvas   .grid(row=1, column=1,              sticky='nsew') 
+        # High-level frames
+        #s = ttk.Style()
+        #s.configure('TFrame', background="green")
+        #s.configure('Frame1.TFrame', background="red")
+        #s.configure('Frame2.TFrame', background='blue')
+
+
+        self.__frame_menu     = ttk.Frame(self)#, style='Frame1.TFrame')
+        self.__frame_status   = ttk.Frame(self)#, style='Frame2.TFrame')
+        self.__frame_canvas   = ttk.Frame(self)#, style='TFrame')
+
+        self.__frame_menu     .grid(row=0, column=0, rowspan=2,   sticky='nsew')
+        self.__frame_status   .grid(row=0, column=1,              sticky='nsew')
+        self.__frame_canvas   .grid(row=1, column=1,              sticky='nsew')
 
         self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(1, weight=1)
@@ -620,6 +633,7 @@ class App(ttk.Frame):
 
         # Canvas frame
         self.__img_canvas     = tk.Canvas       (self.__frame_canvas)
+        self.__img_canvas_new = CanvasImage(self.__frame_canvas)
 
         # Gridding - menu frame
         menu_padx        = 5
@@ -649,13 +663,19 @@ class App(ttk.Frame):
         self.__frame_status.columnconfigure(1, weight=1)
 
         # Gridding - canvas frame
-        self.__img_canvas     .grid(row=0, column=0)
+        #self.__img_canvas     .grid(row=0, column=0)
+        self.__img_canvas_new.grid(row=0, column=0)
+
+        self.__frame_canvas.grid_rowconfigure(0, weight=1)
+        self.__frame_canvas.grid_columnconfigure(0, weight=1)
 
         # Event handler binding
-        self.__img_canvas.bind('<Button-1>', self.__on_left_mouse_button)
-        self.__img_canvas.tag_bind(self.__contour_points_tag, '<Button-1>', self.__point_drag_start)
-        self.__img_canvas.tag_bind(self.__contour_points_tag, '<B1-Motion>', self.__point_drag_motion)
-        self.__img_canvas.tag_bind(self.__contour_points_tag, '<ButtonRelease-1>', self.__point_drag_end)
+        #self.__img_canvas.bind('<Button-1>', self.__on_left_mouse_button)
+        #self.__img_canvas.tag_bind(self.__contour_points_tag, '<Button-1>', self.__point_drag_start)
+        #self.__img_canvas.tag_bind(self.__contour_points_tag, '<B1-Motion>', self.__point_drag_motion)
+        #self.__img_canvas.tag_bind(self.__contour_points_tag, '<ButtonRelease-1>', self.__point_drag_end)
+
+        # (self.__img_canvas_new handles binding itself)
 
         # Trigger UI update for initial state
         self.__update_state(self.__app_state)
@@ -682,7 +702,10 @@ def parse_args():
 def main(args):
     """ Launches the GUI. """
     root = tk.Tk()
-    root.minsize(400, 200)
+    #root.minsize(400, 200)
+    width   = root.winfo_screenwidth()               
+    height  = root.winfo_screenheight()               
+    root.geometry("%dx%d" % (width, height))
 
     #if(args.dark_theme):
     #    root.tk.call('lappend', 'auto_path', '/home/blake/Documents/GitHub/FastSAM/FastSAMUI/themes/awthemes-10.4.0')
