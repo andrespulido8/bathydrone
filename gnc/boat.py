@@ -44,16 +44,16 @@ err_reset_dist = 50
 is_debug = False
 
 # Rudder Control parameters 
-rudder_control = "Integral_stanley"  # 'none', 'step', 'stanley', 'Integral_stanley', or 'MPC'
-alpha_r = 2.5  # Angular gain for Stanley Controller
-k_r = 2  # Control gain for Stanley Controller 
+rudder_control = "stanley"  # 'none', 'step', 'stanley', 'Integral_stanley', or 'MPC'
+alpha_r = 2  # Angular gain for Stanley Controller
+k_r = 10  # Control gain for Stanley Controller 
 
 #extra parameter for integral_stanley controller
-kp_r = 10  # Integral gain for integral stanley controller 
+kp_r = 0.5  # Integral gain for integral stanley controller 
 
 if path_type == "data":
     # Get data collected in the field
-    traj_path = "csv/traj_data/"
+    traj_path = "csv/traj_data/"   
     force_files = ["force_traj_3", "force_traj_6", "force_traj_9", "force_traj_12"]
     drone_files = ["drone_traj_3", "drone_traj_6", "drone_traj_9", "drone_traj_12"]
 elif path_type == "lawnmower" or path_type == "trajectory":
@@ -411,16 +411,19 @@ if __name__ == "__main__":
         T = Ts.sum()
     print("T: ", T)
 
+    # Define time domain
+    t_arr = np.arange(t0, T, dt)
+
     #set up controller for rudder 
     if rudder_control == "stanley":
         ref = get_boat_reference()
+        ref = ref[:int(len(ref)/2)]
         controller = StanleyController(angular_gain=alpha_r, control_gain = k_r, reference=ref, debug=is_debug)
     elif rudder_control == "Integral_stanley":
         ref = get_boat_reference()
+        ref = ref[:int(len(ref)/2)]
         controller = IntegralStanley(angular_gain=alpha_r, control_gain = k_r, Integral_gain = kp_r, reference=ref, debug=is_debug)
 
-    # Define time domain
-    t_arr = np.arange(t0, T, dt)
 
     # Preallocate results memory
     q_history = np.zeros((len(t_arr), 6))
@@ -433,6 +436,16 @@ if __name__ == "__main__":
     dr_v_hist = np.zeros((len(t_arr), ncontrols))
     p_cmd_hist = np.zeros((len(t_arr), 2))
     i_cmd_hist = np.zeros((len(t_arr), 2))
+    delta_history = np.zeros(len(t_arr))
+    crosstrack_error_history = np.zeros(len(t_arr))
+    steering_error_history = np.zeros(len(t_arr))
+    heading_error_history = np.zeros(len(t_arr))
+    d_history = np.zeros(len(t_arr))
+    dx_history = np.zeros(len(t_arr))
+    dy_history = np.zeros(len(t_arr))
+    current_heading_history = np.zeros(len(t_arr))
+    reference_heading_history = np.zeros(len(t_arr))
+    current_velocity_history = np.zeros(len(t_arr))
 
     # Integrate dynamics using first-order forward stepping
     for i, t in enumerate(t_arr):
@@ -525,10 +538,16 @@ if __name__ == "__main__":
                 delta = 24
             else:
                 delta = -24
-        elif rudder_control == "stanley":
-            delta = controller.stanley_control(q[0],q[1],dt)
-        elif rudder_control == "Integral_stanley":
-            delta = controller.stanley_control(q[0],q[1],dt)
+        elif rudder_control == "stanley" or rudder_control == "Integral_stanley":  # controller setup was done before the loop
+            delta, crosstrack_error, steering_error, heading_error = controller.stanley_control(q[0],q[1],dt)
+
+            delta_history[i] = delta
+            crosstrack_error_history[i] = crosstrack_error
+            steering_error_history[i] = steering_error
+            heading_error_history[i] = heading_error
+
+            d_history[i],dx_history[i],dy_history[i], current_heading_history[i], reference_heading_history[i], current_velocity_history[i] = controller.print_debug(q[0],q[1],dt)
+            controller.update_position(q[0],q[1])
 
         # Step forward, x_next = x_last + x_dot*dt
         x = np.concatenate((q, dr)) if not IS_OPEN_LOOP else q
@@ -677,7 +696,63 @@ if __name__ == "__main__":
     ax.grid(True)
     plt.show()
 
-    # TODO: plot rudder control input
+    if rudder_control == "stanley" or rudder_control == "Integral_stanley":
+        # plot rudder control input
+        # Figure for individual results
+        fig4 = plt.figure()
+        fig4.suptitle("Rudder Control", fontsize=20)
+        fig4rows = 3
+        fig4cols = 3
+        # Plot rudder angle 
+        ax = fig4.add_subplot(fig4rows, fig4cols, 1)
+        ax.set_title("Rudder Angle (Degree)", fontsize=16)
+        ax.plot(t_arr, delta_history, "-g", label="rudder angle")
+        #ax.plot(t_arr, dr_history[:, 0], "--b", label="drone")
+        ax.grid(True)
+        ax.legend()
+        # Plot crosstrack error
+        ax = fig4.add_subplot(fig4rows, fig4cols, 2)
+        ax.set_title("Crosstrack Error (m)", fontsize=16)
+        ax.plot(t_arr, crosstrack_error_history, "-g", label="crosstrack error")
+        ax.grid(True)
+        ax.legend()
+        # Plot steering error
+        ax = fig4.add_subplot(fig4rows, fig4cols, 3)
+        ax.set_title("Steering Error (Radian)", fontsize=16)
+        ax.plot(t_arr, steering_error_history, "-g", label="steering error")
+        ax.grid(True)
+        ax.legend()
+        # Plot heading error
+        ax = fig4.add_subplot(fig4rows, fig4cols, 4)
+        ax.set_title("Heading Error (Radian)", fontsize=16)
+        ax.plot(t_arr, heading_error_history, "-g", label="heading error")
+        ax.grid(True)
+        # Plot distance to the reference
+        ax = fig4.add_subplot(fig4rows, fig4cols, 5)
+        ax.set_title("Distance to the reference (m)", fontsize=16)
+        ax.plot(t_arr, d_history, "-g", label="distance")
+        ax.grid(True)
+        # Plot dx to the reference
+        ax = fig4.add_subplot(fig4rows, fig4cols, 6)
+        ax.set_title("dx to the reference (m)", fontsize=16)
+        ax.plot(t_arr, dx_history, "-g", label="dx")
+        ax.grid(True)
+        #plot current velocity
+        ax = fig4.add_subplot(fig4rows, fig4cols, 7)
+        ax.set_title("Current velocity (m/s)", fontsize=16)
+        ax.plot(t_arr, current_velocity_history, "-g", label="current velocity")
+        ax.grid(True)
+        # Plot current heading
+        ax = fig4.add_subplot(fig4rows, fig4cols, 8)
+        ax.set_title("Current heading (Radian)", fontsize=16)
+        ax.plot(t_arr, current_heading_history, "-g", label="current heading")
+        ax.grid(True)
+        # Plot reference heading
+        ax = fig4.add_subplot(fig4rows, fig4cols, 9)
+        ax.set_title("Reference heading (Radian)", fontsize=16)
+        ax.plot(t_arr, reference_heading_history, "-g", label="reference heading")
+        ax.grid(True)
+        plt.show()
 
     if not IS_OPEN_LOOP:
         print(
@@ -914,7 +989,8 @@ if __name__ == "__main__":
     ax3 = fig3.add_subplot(1, 1, 1)
     ax3.plot(q_history[:, 0], q_history[:, 1], "--k", label="Boat Traj. in Sim.")
     ax3.plot(bt_history[:, 0], bt_history[:, 1], "-r", label="Boat Traj. in Exp.")
-    #ax3.plot(ref[:, 0], ref[:, 1], "-b", label="Boat reference Traj")  see which trajectory to follow
+    if rudder_control != "none" and rudder_control != "step":
+        ax3.plot(ref[:, 0], ref[:, 1], "-b", label="Boat reference Traj")  #see which trajectory to follow
     ax3.plot(
         q_history[0, 0], q_history[0, 1], "ok", label="Start Point (Sim. and Exp.)"
     )
@@ -923,3 +999,9 @@ if __name__ == "__main__":
     ax3.grid(True)
     plt.legend()
     plt.show()
+    print(
+            "Mean Square Error X: ", np.mean((q_history[:, 0] - bt_history[:, 0]) ** 2)
+        )
+    print(
+            "Mean Square Error Y: ", np.mean((q_history[:, 1] - bt_history[:, 1]) ** 2)
+        )

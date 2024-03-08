@@ -25,8 +25,9 @@ class IntegralStanley:
         :param dt                           (float) change of time between two times the stanley controller is called
 
         :return limited_steering_angle:     (float) steering angle after imposing steering limits [rad]
-        :return target_index:               (int) closest path index
         :return crosstrack_error:           (float) distance from closest path index [m]
+        :return steering_error:             (float) the heading error after multiply with gain 
+        :return heading_error:              (float) the heading error from the boat
         """
 
         self.alpha = angular_gain 
@@ -124,20 +125,22 @@ class IntegralStanley:
 
         steering_error, heading_error = self.find_steering_error(current_heading,reference_heading)
         crosstrack_error = self.crosstrack_steering_angle(dx,dy,d,current_velocity,reference_heading)
-        self.update_position(x,y)
+        #self.update_position(x,y)    '''temporarily removed for plotting purposes'''
 
         self.integral_error += self.error_previous*dt  #integrate past error with time passed and add that to integral error
-        self.error_previous = steering_error+ (crosstrack_error)  #update the control_angle output 
-        control_angle = steering_error+ (crosstrack_error) + self.ki*self.integral_error  #compute control angle
+        self.error_previous = heading_error+ (-crosstrack_error)  #update the control_angle output 
+        control_angle = steering_error+ (-crosstrack_error) + self.ki*self.integral_error  #compute control angle
         #negative angle seem to make boat follow trajectory better
 
+        ## TODO: change the integral equation to be the same as reflected in the report 
+        
         #can comment this part of the code to debug, give insight to where the angle will be at
         if control_angle > self.max_steer:
             control_angle = self.max_steer
         elif control_angle < -self.max_steer:
             control_angle = -self.max_steer
         #if the control output is greater than the max output of the rudder, then set the rudder to the max
-        return np.rad2deg(control_angle)
+        return np.rad2deg(control_angle), crosstrack_error, steering_error, heading_error 
 
         #this code will print various error to the ros topic 
         
@@ -150,6 +153,14 @@ class IntegralStanley:
             print()
 
         #return control_angle
+            
+    def print_debug(self, x, y, dt):
+        target_index, dx, dy, d = self.find_target_path_id(x, y)
+        current_heading, current_velocity = self.find_current_headingVelocity(x,y,dt)
+        reference_heading = self.find_reference_heading(target_index)
+
+        return d, dx, dy, current_heading, reference_heading, current_velocity
+
     
     
 def main():
@@ -159,9 +170,7 @@ def main():
     
     debug = True 
     
-    Controller = StanleyController(angular_gain=1, control_gain = 2.5, reference=r ,x_previous=0.1-0.1*sqrt(2),y_previous=0.1,debug = debug)
-
-    rospy.spin()
+    Controller = IntegralStanley(angular_gain=1, control_gain = 2.5, reference=r ,x_previous=0.1-0.1*sqrt(2),y_previous=0.1,debug = debug)
 
 if __name__ == '__main__':
     main()
