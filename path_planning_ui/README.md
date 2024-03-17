@@ -1,17 +1,14 @@
-# Segment Anything Testing
-
-Repo for hosting any experiments I do with Meta's Segment Anything model or [FastSAM](https://github.com/CASIA-IVA-Lab/FastSAM).
 
 # Project: APRILab FastSAM UI
-Goal: Design a UI to integrate the path planning workflow for the [Bathydrone](https://aprilab.mae.ufl.edu/research/) project.
+Goal: Design a UI to integrate the path planning workflow for the [Bathydrone](https://aprilab.mae.ufl.edu/research/), using [FastSAM](https://github.com/CASIA-IVA-Lab/FastSAM) for water body detection.
 
 ## Setup and Installation (Ubuntu 20.04):
 Clone the repo:
 ```console
-$ git clone https://github.com/BlakeSanders10497/SAM_Testing.git
+$ git clone https://github.com/andrespulido8/bathydrone.git 
 ```
 
-Once you have cloned and entered the repo, it is recommended to create a virtual environment using [venv](https://docs.python.org/3/tutorial/venv.html):
+Once you have cloned and entered this directory in the repo, it is recommended to create a virtual environment using [venv](https://docs.python.org/3/tutorial/venv.html):
 ### 1. Install Python and venv
 - (Verified on version 3.9. FastSAM relies on 3.7 or later; see https://github.com/CASIA-IVA-Lab/FastSAM#installation for more information.)
 ```console
