@@ -19,6 +19,8 @@ Author: Blake Sanders (https://github.com/BlakeSanders10497)
 from enum import Enum
 import argparse
 import csv
+import sys
+import os
 
 import tkinter as tk
 from tkinter import ttk
@@ -32,7 +34,18 @@ import numpy as np
 from PIL import ImageTk, Image
 from fastsam import FastSAM, FastSAMVideoPrompt
 
-from utils.path_planner_2023 import *
+
+# This script's directory
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
+# This script's parent directory
+parent_dir = os.path.dirname(current_dir)
+
+# Append the parent directory to sys.path
+sys.path.append(parent_dir)
+
+# Out-of-package imports
+from gnc.path_planner_2023 import *
 
 # create_circle function addition to tkinter
 # Source: https://stackoverflow.com/questions/17985216/simpler-way-to-draw-a-circle-with-tkinter
