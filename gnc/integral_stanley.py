@@ -44,8 +44,10 @@ class IntegralStanley:
 
         self.current_time = 0
         self.previous_time = 0
-        self.error_previous = 0  #used for integration of error
-        self.integral_error = 0  #used for integration of error
+        self.phi_integral = 0  #used for integration of heading error
+        self.phi_p = 0  #previous heading error
+        self.e_integral = 0  #used for integration of crosstrack error
+        self.e_p = 0  #previous crosstrack error
 
     
     def find_target_path_id(self, x, y):  
@@ -72,13 +74,29 @@ class IntegralStanley:
         self.x_p = x
         self.y_p = y  
     
+    def get_distance(self, lat1, lon1, lat2, lon2): 
+        """Returns the distance between two points, convert from latitude/logitude to meters"""
+        lat1 = np.deg2rad(lat1)
+        lon1 = np.deg2rad(lon1)
+        lat2 = np.deg2rad(lat2)
+        lon2 = np.deg2rad(lon2)
+        R = 6_378_100
+        dx = (lon2 - lon1) * np.cos(0.5*(lat2+lat1))
+        dy = lat2 - lat1
+        return R * np.sqrt(dx**2 + dy**2), dx, dy
+
     def find_reference_heading(self, target_index): 
-        if target_index == self.rx.size-1:  #account for edge case when the target_index is at very end, it will be out of bound 
-            dx = self.rx[target_index] - self.rx[target_index-1]
-            dy = self.ry[target_index] - self.ry[target_index-1]
-        else: 
-            dx = self.rx[target_index+1] - self.rx[target_index]
-            dy = self.ry[target_index+1] - self.ry[target_index]  #find the vector pointing from closest waypoint to the next waypoint
+        """Finds the heading of the reference path at the closest waypoint"""
+        dx, dy = 0, 0
+        jj = 0
+        while dx == 0 or dy == 0 and target_index+jj < self.rx.size-1:  # this while loop make sure there is a change in reference heading
+            jj += 1
+            if target_index == self.rx.size-1:  #account for edge case when the target_index is at very end, it will be out of bound 
+                dx = self.rx[target_index] - self.rx[target_index-jj]
+                dy = self.ry[target_index] - self.ry[target_index-jj]
+            else: 
+                dx = self.rx[target_index+jj] - self.rx[target_index]
+                dy = self.ry[target_index+jj] - self.ry[target_index]  #find the vector pointing from closest waypoint to the next waypoint
         reference_heading = atan2(dy,dx)   #find the angle of that vector 
 
         return reference_heading
@@ -106,6 +124,12 @@ class IntegralStanley:
 
         theta = atan2(dy,dx) - reference_heading
 
+        #account for angle wrapping 
+        if theta < -pi: 
+            theta = theta + 2*pi
+        elif theta > pi:
+            theta = theta - 2*pi
+
         #so there is no division by 0 in the controller 
         if current_velocity == 0:
             current_velocity = 1
@@ -127,13 +151,14 @@ class IntegralStanley:
         crosstrack_error = self.crosstrack_steering_angle(dx,dy,d,current_velocity,reference_heading)
         #self.update_position(x,y)    '''temporarily removed for plotting purposes'''
 
-        self.integral_error += self.error_previous*dt  #integrate past error with time passed and add that to integral error
-        self.error_previous = heading_error+ (-crosstrack_error)  #update the control_angle output 
-        control_angle = steering_error+ (-crosstrack_error) + self.ki*self.integral_error  #compute control angle
-        #negative angle seem to make boat follow trajectory better
+        self.phi_integral += self.phi_p*dt
+        self.e_integral += self.e_p*dt  #update the integral term for both heading and crosstrack error
+        self.phi_p = heading_error
+        self.e_p = crosstrack_error  #update the previous error term for both heading and crosstrack error
 
-        ## TODO: change the integral equation to be the same as reflected in the report 
-        
+        control_angle = steering_error+ (-crosstrack_error) + self.ki*self.phi_integral + (-self.e_integral)  #seem to make the boat follow reference better
+        # Make sure the equation is the same as the equation from the report 
+
         #can comment this part of the code to debug, give insight to where the angle will be at
         if control_angle > self.max_steer:
             control_angle = self.max_steer

@@ -60,22 +60,39 @@ class StanleyController:
         dy = y - self.y_p  #find the distance travelled between the two time steps
         current_heading = atan2(dy,dx)
         current_velocity = sqrt((dx**2) + (dy**2))/dt
-        current_velocity = current_velocity*100000
+        current_velocity = current_velocity
 
         return current_heading, current_velocity
     
+    def get_distance(self, lat1, lon1, lat2, lon2): 
+        """Returns the distance between two points, convert from latitude/logitude to meters"""
+        lat1 = np.deg2rad(lat1)
+        lon1 = np.deg2rad(lon1)
+        lat2 = np.deg2rad(lat2)
+        lon2 = np.deg2rad(lon2)
+        R = 6_378_100
+        dx = (lon2 - lon1) * np.cos(0.5*(lat2+lat1))
+        dy = lat2 - lat1
+        return R * np.sqrt(dx**2 + dy**2), dx, dy
+        
+
     def update_position(self,x,y):
         """update previous coordinate with current coordinate to allow the next calculation""" 
         self.x_p = x
         self.y_p = y  
     
     def find_reference_heading(self, target_index): 
-        if target_index == self.rx.size-1:  #account for edge case when the target_index is at very end, it will be out of bound 
-            dx = self.rx[target_index] - self.rx[target_index-1]
-            dy = self.ry[target_index] - self.ry[target_index-1]
-        else: 
-            dx = self.rx[target_index+1] - self.rx[target_index]
-            dy = self.ry[target_index+1] - self.ry[target_index]  #find the vector pointing from closest waypoint to the next waypoint
+        """Finds the heading of the reference path at the closest waypoint"""
+        dx, dy = 0, 0
+        jj = 0
+        while dx == 0 or dy == 0 and target_index+jj < self.rx.size-1:  # this while loop make sure there is a change in reference heading
+            jj += 1
+            if target_index == self.rx.size-1:  #account for edge case when the target_index is at very end, it will be out of bound 
+                dx = self.rx[target_index] - self.rx[target_index-jj]
+                dy = self.ry[target_index] - self.ry[target_index-jj]
+            else: 
+                dx = self.rx[target_index+jj] - self.rx[target_index]
+                dy = self.ry[target_index+jj] - self.ry[target_index]  #find the vector pointing from closest waypoint to the next waypoint
         reference_heading = atan2(dy,dx)   #find the angle of that vector 
 
         return reference_heading
@@ -102,6 +119,12 @@ class StanleyController:
         """
 
         theta = atan2(dy,dx) - reference_heading
+
+        #account for angle wrapping 
+        if theta < -pi: 
+            theta = theta + 2*pi
+        elif theta > pi:
+            theta = theta - 2*pi
 
         #so there is no division by 0 in the controller 
         if current_velocity == 0:

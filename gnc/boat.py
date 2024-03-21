@@ -44,12 +44,12 @@ err_reset_dist = 50
 is_debug = False
 
 # Rudder Control parameters 
-rudder_control = "stanley"  # 'none', 'step', 'stanley', 'Integral_stanley', or 'MPC'
-alpha_r = 2  # Angular gain for Stanley Controller
-k_r = 10  # Control gain for Stanley Controller 
+rudder_control = "Integral_stanley"  # 'none', 'step', 'stanley', 'Integral_stanley', or 'MPC'
+alpha_r = 0.6  # Angular gain for Stanley Controller
+k_r = 0.5  # Control gain for Stanley Controller 
 
 #extra parameter for integral_stanley controller
-kp_r = 0.5  # Integral gain for integral stanley controller 
+kp_r = 0.1  # Integral gain for integral stanley controller 
 
 if path_type == "data":
     # Get data collected in the field
@@ -160,7 +160,7 @@ def get_boat_position(t, ii):
         y = df_bt["Y_m"].iloc[ii]
         return np.array([x, y, 0, 0, 0, 0]), ii
     
-def get_boat_reference():
+def get_boat_reference():  # get the reference trajectory of the boat, but in this case uses drone reference for controller because it is smoother 
     '''Return the reference trajectory of the boat'''
     ref = []
     for ii in range(len(df_bt["X_m"].iloc[:])):
@@ -988,7 +988,7 @@ if __name__ == "__main__":
     fig3 = plt.figure()
     ax3 = fig3.add_subplot(1, 1, 1)
     ax3.plot(q_history[:, 0], q_history[:, 1], "--k", label="Boat Traj. in Sim.")
-    ax3.plot(bt_history[:, 0], bt_history[:, 1], "-r", label="Boat Traj. in Exp.")
+    # ax3.plot(bt_history[:, 0], bt_history[:, 1], "-r", label="Boat Traj. in Exp.")
     if rudder_control != "none" and rudder_control != "step":
         ax3.plot(ref[:, 0], ref[:, 1], "-b", label="Boat reference Traj")  #see which trajectory to follow
     ax3.plot(
