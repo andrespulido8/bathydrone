@@ -1,0 +1,11 @@
+*.swp
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+.idea
+.venv
+weights
+gradio_cached_examples
+output
+output.csv
