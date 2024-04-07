@@ -156,7 +156,18 @@ class IntegralStanley:
         self.phi_p = heading_error
         self.e_p = crosstrack_error  #update the previous error term for both heading and crosstrack error
 
-        control_angle = steering_error+ (-crosstrack_error) + self.ki*self.phi_integral + (-self.e_integral)  #seem to make the boat follow reference better
+        limit = self.max_steer*1.5
+        if self.e_integral > limit:
+            self.e_integral = limit
+        elif self.e_integral < -limit:
+            self.e_integral = -limit     #limit the integral term to half of max steering angle
+        
+        if self.phi_integral > limit:
+            self.phi_integral = limit
+        elif self.phi_integral < -limit:
+            self.phi_integral = -limit    #limit the integral term to half of max steering angle 
+
+        control_angle = steering_error+ (-crosstrack_error) + self.ki*self.phi_integral + (-self.e_integral*self.ki)  #seem to make the boat follow reference better
         # Make sure the equation is the same as the equation from the report 
 
         #can comment this part of the code to debug, give insight to where the angle will be at

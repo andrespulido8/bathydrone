@@ -44,12 +44,12 @@ err_reset_dist = 50
 is_debug = False
 
 # Rudder Control parameters 
-rudder_control = "Integral_stanley"  # 'none', 'step', 'stanley', 'Integral_stanley', or 'MPC'
+rudder_control = "stanley"  # 'none', 'step', 'stanley', 'Integral_stanley', or 'MPC'
 alpha_r = 0.6  # Angular gain for Stanley Controller
 k_r = 0.5  # Control gain for Stanley Controller 
 
 #extra parameter for integral_stanley controller
-kp_r = 0.1  # Integral gain for integral stanley controller 
+kp_r = 0.2  # Integral gain for integral stanley controller 
 
 if path_type == "data":
     # Get data collected in the field
@@ -409,6 +409,8 @@ if __name__ == "__main__":
     elif path_type == "trajectory":
         dt = 0.01
         T = Ts.sum()
+
+    #dt = 1  #make time to be every 1 second
     print("T: ", T)
 
     # Define time domain
