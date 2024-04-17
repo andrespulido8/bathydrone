@@ -32,8 +32,8 @@ IS_OPEN_LOOP = True
 path_type = "raster"  # 'lawnmower', 'line', 'obstacle', 'trajectory', 'raster' or 'data'
 # don't use "trajectory or obstacle path type, as they use lqrrt planner"
 raster = [[1,1], [1,30], [5,30], [5,1], [10,1], [10,30], [15,30], [15,1], [20,1], [20,30], [25,30], [25,1], [30,1], [30,30], [35,30], [35,1], [40,1], [40,30], [45,30], [45,1], [50,1], [50,30], [55,30], [55,1], [60,1], [60,30], [65,30], [65,1], [70,1], [70,30], [75,30], [75,1], [80,1], [80,30], [85,30], [85,1], [90,1], [90,30], [95,30], [95,1], [100,1], [100,30]]
-raster_v = 5  # m/s
-raster_pt_num = 5000
+raster_v = 1  # m/s
+raster_pt_num = 10000
 
 # Controller parameters
 kp = np.array([0.08, 0.08, 0])
@@ -48,7 +48,7 @@ err_reset_dist = 50
 is_debug = False
 
 # Rudder Control parameters 
-rudder_control = "Integral_stanley"  # 'none', 'step', 'stanley', 'Integral_stanley', or 'MPC'
+rudder_control = "step"  # 'none', 'step', 'stanley', 'Integral_stanley', or 'MPC'
 alpha_r = 0.6  # Angular gain for Stanley Controller
 k_r = 0.5  # Control gain for Stanley Controller 
 
@@ -189,15 +189,23 @@ def get_drone_position(t, hd, ii):
     y = df_dr["Y_m"].iloc[ii]
     return np.array([x, y, hd]), ii
 
-def get_raster_position(t, raster_v, ref):
-    '''Return the position of the drone in a point in time, depending on the desired velocity'''
-    d = t*raster_v
-    ii = 0
-    d_c = 0
-    while d_c < d:
-        d_c += np.sqrt((ref[ii+1][0]-ref[ii][0])**2 + (ref[ii+1][1]-ref[ii][1])**2)
-        ii += 1
-    return np.array([ref[ii][0], ref[ii][1], raster_v]), ii
+def precompute_distances(ref):
+    '''Precompute the distances between the points in the reference trajectory to save computation time'''
+    distances = np.zeros(len(ref))
+    for i in range(1, len(ref)):
+        distances[i] = distances[i - 1] + np.abs(ref[i][0] - ref[i - 1][0]) + np.abs(ref[i][1] - ref[i - 1][1])
+    return distances
+
+def get_raster_position(t, raster_v, ref, distances):
+    '''Return the position of the drone at a point in time, depending on the desired velocity'''
+    d = t * raster_v
+    idx = np.searchsorted(distances, d, side='right')
+    if idx == 0:
+        return np.array([ref[0][0], ref[0][1], raster_v]), 0
+    else:
+        d_c = distances[idx - 1]
+        position = np.array([ref[idx - 1][0], ref[idx - 1][1], raster_v])
+        return position, idx - 1 if d - d_c < d - distances[idx] else idx
 
 
 def pid_controller(t, t_last, q, q_ref, q_dot, q_ref_dot, err_accumulation):
@@ -279,6 +287,7 @@ if __name__ == "__main__":
         df_dr = df_dr.drop(df_dr.index[range(0, 76)])
     elif path_type == 'raster':
         ref = np.array(interpolate_points(raster, raster_pt_num))
+        distances = precompute_distances(ref)
 
     # choose magnitude depending on the drones dataset
     ten_mag = tension_magnitudes[data_file_index]
@@ -327,7 +336,7 @@ if __name__ == "__main__":
         dynamics.dr = np.copy(dr0)
     elif path_type == "raster":
         q0 = np.array([ref[0][0], ref[0][1], 0, 0, 0, 0], dtype=np.float64)
-        dr0, _ = get_raster_position(t_last, raster_v, ref)
+        dr0, _ = get_raster_position(t_last, raster_v, ref, distances)
         dynamics.dr = np.copy(dr0)
 
     dr = np.copy(dr0)
@@ -416,7 +425,7 @@ if __name__ == "__main__":
         T = 150  # s
         dt = 0.001
     if path_type == "raster":
-        T = 100
+        T = 500
         dt = 0.01
     elif path_type == "lawnmower":
         dist_between_pts = 7
@@ -496,7 +505,7 @@ if __name__ == "__main__":
             q_ref, ii_last = get_boat_position(t, ii_last)
             q_ref_dot = 0
         elif path_type == "raster":
-            q_ref, ii_last = get_raster_position(t, raster_v, ref)
+            q_ref, ii_last = get_raster_position(t, raster_v, ref, distances)
             q_ref = np.append(q_ref, [0, 0, 0])
             q_ref_dot = 0
 
@@ -508,7 +517,7 @@ if __name__ == "__main__":
                     )
                 elif path_type == "raster":
                     dynamics.dr, i_last = get_raster_position(
-                        t, raster_v, ref
+                        t, raster_v, ref, distances
                     )
                 elif path_type == "lawnmower":
                     dynamics.dr = q_ref[:3]
