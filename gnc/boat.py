@@ -23,13 +23,17 @@ from path_planning import pp
 from tethered_dynamics import TetheredDynamics
 from stanley_controller import StanleyController
 from integral_stanley import IntegralStanley
+from waypoint_gen import interpolate_points, plot_points
 
 npl = np.linalg
 
 IS_OPEN_LOOP = True
 
-path_type = "data"  # 'lawnmower', 'line', 'obstacle', 'trajectory' or 'data'
+path_type = "raster"  # 'lawnmower', 'line', 'obstacle', 'trajectory', 'raster' or 'data'
 # don't use "trajectory or obstacle path type, as they use lqrrt planner"
+raster = [[1,1], [1,30], [5,30], [5,1], [10,1], [10,30], [15,30], [15,1], [20,1], [20,30], [25,30], [25,1], [30,1], [30,30], [35,30], [35,1], [40,1], [40,30], [45,30], [45,1], [50,1], [50,30], [55,30], [55,1], [60,1], [60,30], [65,30], [65,1], [70,1], [70,30], [75,30], [75,1], [80,1], [80,30], [85,30], [85,1], [90,1], [90,30], [95,30], [95,1], [100,1], [100,30]]
+raster_v = 5  # m/s
+raster_pt_num = 5000
 
 # Controller parameters
 kp = np.array([0.08, 0.08, 0])
@@ -44,7 +48,7 @@ err_reset_dist = 50
 is_debug = False
 
 # Rudder Control parameters 
-rudder_control = "stanley"  # 'none', 'step', 'stanley', 'Integral_stanley', or 'MPC'
+rudder_control = "Integral_stanley"  # 'none', 'step', 'stanley', 'Integral_stanley', or 'MPC'
 alpha_r = 0.6  # Angular gain for Stanley Controller
 k_r = 0.5  # Control gain for Stanley Controller 
 
@@ -185,6 +189,16 @@ def get_drone_position(t, hd, ii):
     y = df_dr["Y_m"].iloc[ii]
     return np.array([x, y, hd]), ii
 
+def get_raster_position(t, raster_v, ref):
+    '''Return the position of the drone in a point in time, depending on the desired velocity'''
+    d = t*raster_v
+    ii = 0
+    d_c = 0
+    while d_c < d:
+        d_c += np.sqrt((ref[ii+1][0]-ref[ii][0])**2 + (ref[ii+1][1]-ref[ii][1])**2)
+        ii += 1
+    return np.array([ref[ii][0], ref[ii][1], raster_v]), ii
+
 
 def pid_controller(t, t_last, q, q_ref, q_dot, q_ref_dot, err_accumulation):
     """calculate the control input (velocity) based on the desired
@@ -263,6 +277,8 @@ if __name__ == "__main__":
         # up to 76 index is garbage data
         df_dr["time"] = df_dr["time"] - df_dr["time"].to_numpy()[76]
         df_dr = df_dr.drop(df_dr.index[range(0, 76)])
+    elif path_type == 'raster':
+        ref = np.array(interpolate_points(raster, raster_pt_num))
 
     # choose magnitude depending on the drones dataset
     ten_mag = tension_magnitudes[data_file_index]
@@ -309,6 +325,11 @@ if __name__ == "__main__":
         )
         dr0, _ = get_drone_position(t_last, dynamics.hd, i_last)
         dynamics.dr = np.copy(dr0)
+    elif path_type == "raster":
+        q0 = np.array([ref[0][0], ref[0][1], 0, 0, 0, 0], dtype=np.float64)
+        dr0, _ = get_raster_position(t_last, raster_v, ref)
+        dynamics.dr = np.copy(dr0)
+
     dr = np.copy(dr0)
     q = np.copy(q0)
     x = np.concatenate((q0, dr0))
@@ -394,6 +415,9 @@ if __name__ == "__main__":
     if path_type == "line":
         T = 150  # s
         dt = 0.001
+    if path_type == "raster":
+        T = 100
+        dt = 0.01
     elif path_type == "lawnmower":
         dist_between_pts = 7
         T = (
@@ -417,15 +441,20 @@ if __name__ == "__main__":
     t_arr = np.arange(t0, T, dt)
 
     #set up controller for rudder 
-    if rudder_control == "stanley":
-        ref = get_boat_reference()
-        ref = ref[:int(len(ref)/2)]
-        controller = StanleyController(angular_gain=alpha_r, control_gain = k_r, reference=ref, debug=is_debug)
-    elif rudder_control == "Integral_stanley":
-        ref = get_boat_reference()
-        ref = ref[:int(len(ref)/2)]
-        controller = IntegralStanley(angular_gain=alpha_r, control_gain = k_r, Integral_gain = kp_r, reference=ref, debug=is_debug)
-
+    if path_type == 'data':
+        if rudder_control == "stanley":
+            ref = get_boat_reference()
+            ref = ref[:int(len(ref)/2)]
+            controller = StanleyController(angular_gain=alpha_r, control_gain = k_r, reference=ref, debug=is_debug)
+        elif rudder_control == "Integral_stanley":
+            ref = get_boat_reference()
+            ref = ref[:int(len(ref)/2)]
+            controller = IntegralStanley(angular_gain=alpha_r, control_gain = k_r, Integral_gain = kp_r, reference=ref, debug=is_debug)
+    elif path_type == 'raster':
+        if rudder_control == "stanley":
+            controller = StanleyController(angular_gain=alpha_r, control_gain = k_r, reference=ref, debug=is_debug)
+        elif rudder_control == "Integral_stanley":
+            controller = IntegralStanley(angular_gain=alpha_r, control_gain = k_r, Integral_gain = kp_r, reference=ref, debug=is_debug)
 
     # Preallocate results memory
     q_history = np.zeros((len(t_arr), 6))
@@ -466,12 +495,20 @@ if __name__ == "__main__":
             # q_ref is boat position from the data
             q_ref, ii_last = get_boat_position(t, ii_last)
             q_ref_dot = 0
+        elif path_type == "raster":
+            q_ref, ii_last = get_raster_position(t, raster_v, ref)
+            q_ref = np.append(q_ref, [0, 0, 0])
+            q_ref_dot = 0
 
         if IS_OPEN_LOOP:
             if npl.norm(q[:2] - dr[:2]) <= dynamics.proj_le + dynamics.dL:
                 if path_type == "data":
                     dynamics.dr, i_last = get_drone_position(
                         t_last, dynamics.hd, i_last
+                    )
+                elif path_type == "raster":
+                    dynamics.dr, i_last = get_raster_position(
+                        t, raster_v, ref
                     )
                 elif path_type == "lawnmower":
                     dynamics.dr = q_ref[:3]
@@ -990,9 +1027,9 @@ if __name__ == "__main__":
     fig3 = plt.figure()
     ax3 = fig3.add_subplot(1, 1, 1)
     ax3.plot(q_history[:, 0], q_history[:, 1], "--k", label="Boat Traj. in Sim.")
-    # ax3.plot(bt_history[:, 0], bt_history[:, 1], "-r", label="Boat Traj. in Exp.")
-    if rudder_control != "none" and rudder_control != "step":
-        ax3.plot(ref[:, 0], ref[:, 1], "-b", label="Boat reference Traj")  #see which trajectory to follow
+    ax3.plot(bt_history[:, 0], bt_history[:, 1], "-r", label="Boat Traj. in Exp.")
+    #if rudder_control != "none" and rudder_control != "step":
+        #ax3.plot(ref[:, 0], ref[:, 1], "-b", label="Boat reference Traj")  #see which trajectory to follow
     ax3.plot(
         q_history[0, 0], q_history[0, 1], "ok", label="Start Point (Sim. and Exp.)"
     )
@@ -1001,6 +1038,27 @@ if __name__ == "__main__":
     ax3.grid(True)
     plt.legend()
     plt.show()
+
+    # This part of the code get rid of the error that's caused by time delay and only measures how close the boat is to the trajectory
+    ref = get_boat_reference()
+    ref = ref[:int(len(ref)/2)]
+    count = 0
+    error = []
+    error_x = []
+    error_y = []
+    for ii in ref:
+        dx = q_history[:, 0] - ii[0]
+        dy = q_history[:, 1] - ii[1]
+        d = np.hypot(dx, dy)
+        error.append(min(d))
+        error_x.append(min(abs(dx)))
+        error_y.append(min(abs(dy)))
+        count += 1
+    print("Mean Error: ", np.mean(error))
+    print("Mean Error X: ", np.mean(error_x))
+    print("Mean Error Y: ", np.mean(error_y))
+
+
     print(
             "Mean Square Error X: ", np.mean((q_history[:, 0] - bt_history[:, 0]) ** 2)
         )
