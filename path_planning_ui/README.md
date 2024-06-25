@@ -50,6 +50,12 @@ $ pip3 install torch torchvision torchaudio --index-url https://download.pytorch
 $ pip install wheel
 $ pip install -r requirements.txt
 ```
+- If you want to run the generate a path, you may need to also install the path planner dependencies
+```console
+$ cd ../gnc/
+$ pip install -r requirements.txt
+$ cd ../path_planning_ui/
+```
 - Install CLIP:
 ```console
 $ pip install git+https://github.com/openai/CLIP.git
