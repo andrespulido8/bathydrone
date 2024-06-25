@@ -37,15 +37,18 @@ from fastsam import FastSAM, FastSAMVideoPrompt
 
 # This script's directory
 current_dir = os.path.dirname(os.path.abspath(__file__))
+print(f'Current directory: {current_dir}')
 
 # This script's parent directory
 parent_dir = os.path.dirname(current_dir)
+print(f'Parent directory: {parent_dir}')
 
 # Append the parent directory to sys.path
 sys.path.append(parent_dir)
+print(f'Sys.path: {sys.path}')
 
 # Out-of-package imports
-from gnc.path_planner_2023 import *
+from gnc.path_planner_2023 import generatePath
 
 # create_circle function addition to tkinter
 # Source: https://stackoverflow.com/questions/17985216/simpler-way-to-draw-a-circle-with-tkinter
@@ -565,12 +568,15 @@ class App(ttk.Frame):
     def __generate_path(self):
         """ Generates and renders a path returned by the path planner. """
 
-        # Create separate lists of x and y coordinates from bounding contour points
-        x_coords = [point[0][0] for point in self.__segment_contour]
-        y_coords = [point[0][1] for point in self.__segment_contour]
+        points_list = [[point[0][0], point[0][1]] for point in self.__segment_contour]
+        points_list = np.array(points_list)
+
+        # PATH DISTANCE CALCULATION (when physical parameters are unknown)
+        pathDist = abs((max(points_list[:, 0]) - min(points_list[:, 0]))/15)
 
         # Generate a path
-        waypoint_coords = fullPath(x_coords, y_coords)
+        waypoint_coords, _, is_empty, _, _ = generatePath(points_list, pathDist)
+        assert not is_empty, 'Path generation failed.'
 
         # Draw the path
         self.__img_canvas.create_line(waypoint_coords, fill='red', width=2)
