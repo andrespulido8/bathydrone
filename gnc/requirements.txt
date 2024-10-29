@@ -1,3 +1,5 @@
 geopandas
 shapely
 py2opt
+matplotlib
+scipy
