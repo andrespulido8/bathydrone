@@ -60,6 +60,8 @@ print(f'Sys.path: {sys.path}')
 # Out-of-package imports
 from path_planner_2023 import generatePath
 
+from mission_planner_code_python import plan_mission
+
 # create_circle function addition to tkinter
 # Source: https://stackoverflow.com/questions/17985216/simpler-way-to-draw-a-circle-with-tkinter
 def _create_circle(self, x, y, r, **kwargs):
@@ -603,21 +605,6 @@ class App(ttk.Frame):
         lat_bottom = float(self.__entry_bottom_latitude.get())
         long_bottom = float(self.__entry_bottom_longitude.get())
 
-        ref_lla = np.array([
-                    [29.408446, -82.170371],
-                    [29.407492, -82.168867],
-                    [29.408435, -82.169896],
-                    [29.407235, -82.170208]
-        ])
-        # use these instead
-        lat_left, long_left = ref_lla[0]
-        lat_right, long_right = ref_lla[1]
-        lat_top, long_top = ref_lla[2]
-        lat_bottom, long_bottom = ref_lla[3]
-
-        # creating target and reference point arrays for bilinear interpolation
-        # points array put in this specific order to create grid for bilinear interpolation
-
         left_x, left_y = self.__contour_bounds["left"]
         right_x, right_y = self.__contour_bounds["right"]
         top_x, top_y = self.__contour_bounds["top"]
@@ -647,8 +634,14 @@ class App(ttk.Frame):
         return lat_long_turn
 
     def __mission_planner_waypoint(self, lat_long_turn):
-        """Uses Henry's Mission Planner Code To Export WayPoint File For Mission Planner Simulation"""
-        from mission_planner_code_python import plan_mission
+        """Function created to generate a .waypoint file that contains details pertaining to the drone's autonomous planned path. 
+        The file generated is to be imported into Mission Planner application.
+        
+        Args: 
+            lat_long_turn: 3 column numpy array containing information related to each waypoint's latitude, longitude, and turn status.
+            
+        Returns: 
+            waypoints_data: .waypoints file that contains a 9 column array containing parameter information for drone's waypoints."""
 
         waypoints_data = plan_mission(lat_long_turn)  # associated button for export : line 810
 
