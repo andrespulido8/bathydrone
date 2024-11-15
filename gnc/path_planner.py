@@ -32,7 +32,7 @@ class PathPlanner:
     def __init__(self, sideScanAngle=30, **system_params):
         self.bounding = None
         self.sideScanAngle = sideScanAngle
-        self.maxRange = system_params.get("maxRange", None) 
+        self.maxRange = system_params.get("maxRange", None)
         self.minRange = system_params.get("minRange", None)
         self.maxDepth = system_params.get("maxDepth", None)
         self.noRequireParallel = system_params.get("noRequireParallel", None)
@@ -45,9 +45,9 @@ class PathPlanner:
 
         # APPROXIMATE DECOMPOSITION
         # Path distance approximation (when physical parameters are unknown)
-        pathDist = abs((max(xList) - min(xList)) * path_dist_ratio) 
+        pathDist = abs((max(xList) - min(xList)) * path_dist_ratio)
         # Decomposition Tolerance Constant (SL-Concavity)
-        tol = pathDist * tol_factor 
+        tol = pathDist * tol_factor
         pTest = self.decomposePolygon(tol, geom)
 
         # GENERATE PATH FOR EACH DECOMPOSED POLYGON
@@ -61,7 +61,9 @@ class PathPlanner:
 
         # PLOTTING
         if is_plot:
-            self.plotPath(xList, yList, testPathArr, pathCenters, best_route, best_distance)
+            self.plotPath(
+                xList, yList, testPathArr, pathCenters, best_route, best_distance
+            )
         else:
             return testPathArr
 
@@ -70,10 +72,20 @@ class PathPlanner:
         # TODO add support for depth map
         if "csvName" in boundingInput:
             # fetch from CSV
-            setattr(self, "bounding", BoundingRegion(bounding_polygon=None, csvName=boundingInput["csvName"]))
+            setattr(
+                self,
+                "bounding",
+                BoundingRegion(bounding_polygon=None, csvName=boundingInput["csvName"]),
+            )
         elif "bounding_polygon" in boundingInput:
             # get from bounding polygon provided directly as an array of tuples.
-            setattr(self, "bounding", BoundingRegion(bounding_polygon=boundingInput["bounding_polygon"], csvName=None))
+            setattr(
+                self,
+                "bounding",
+                BoundingRegion(
+                    bounding_polygon=boundingInput["bounding_polygon"], csvName=None
+                ),
+            )
 
     def generate_path(
         self, polygon_points: List[Tuple[float, float]], path_dist: float
@@ -426,8 +438,8 @@ class PathPlanner:
         return pathCenters, testPathArr
 
     def decomposePolygon(self, tolerance, polygonToDecompose):
-        """ Decompose polygon in to approximately convex sub-polygons
-            
+        """Decompose polygon in to approximately convex sub-polygons
+
         Args:
             tolerance (float): tolerance for decomposition
             polygonToDecompose (Polygon): polygon to decompose
@@ -565,7 +577,9 @@ class BoundingRegion:
             assert bounding_polygon is not None, "No polygon provided."
             self.polygonVertices = [tuple(xy_list) for xy_list in bounding_polygon]
         else:
-            assert bounding_polygon is None, "Provide either bounding polygon or csv. Set other as None."
+            assert (
+                bounding_polygon is None
+            ), "Provide either bounding polygon or csv. Set other as None."
             self.polygonVertices = self.get_polygon_from_csv(csvName)
 
     @staticmethod

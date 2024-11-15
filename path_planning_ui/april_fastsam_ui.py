@@ -16,169 +16,176 @@ Author: Blake Sanders (https://github.com/BlakeSanders10497)
 
 """
 
-from enum import Enum
 import argparse
-import sys
+import csv
 import os
-
+import sys
 import tkinter as tk
-from tkinter import ttk
-from tkinter import filedialog
-
-import torch
+from enum import Enum
+from tkinter import filedialog, ttk
 
 import cv2
 import numpy as np
-import csv
-
-from PIL import ImageTk, Image
-from fastsam import FastSAM, FastSAMVideoPrompt
+import torch
 from adding_accel_decel_waypoints import accel_del_waypoints
+from fastsam import FastSAM, FastSAMVideoPrompt
 from LatLongTurn_Integrated_Code import bi_linear_interpolation, turning_points
-
+from PIL import Image, ImageTk
 
 # This script's directory
 current_dir = os.path.dirname(os.path.abspath(__file__))
-print(f'Current directory: {current_dir}')
+print(f"Current directory: {current_dir}")
 
 # This script's parent directory
 parent_dir = os.path.dirname(current_dir)
-print(f'Parent directory: {parent_dir}')
+print(f"Parent directory: {parent_dir}")
 
 # Append the parent directory to sys.path
 sys.path.append(parent_dir)
-print(f'Sys.path: {sys.path}')
+print(f"Sys.path: {sys.path}")
 
-# Construct the relative path to the gnc directory from the parent directory of current file 
+# Construct the relative path to the gnc directory from the parent directory of current file
 gnc_path = os.path.join(parent_dir, "gnc")
-print(f'GNC path: {gnc_path}')
+print(f"GNC path: {gnc_path}")
 
 # Append the gnc directory to sys.path
 if gnc_path not in sys.path:
     sys.path.append(gnc_path)
 
-print(f'Sys.path: {sys.path}')
-
-# Out-of-package imports
-from path_planner import PathPlanner 
+print(f"Sys.path: {sys.path}")
 
 from mission_planner_code_python import plan_mission
+
+# Out-of-package imports
+from path_planner import PathPlanner
+
 
 # create_circle function addition to tkinter
 # Source: https://stackoverflow.com/questions/17985216/simpler-way-to-draw-a-circle-with-tkinter
 def _create_circle(self, x, y, r, **kwargs):
-    return self.create_oval(x-r, y-r, x+r, y+r, **kwargs)
+    return self.create_oval(x - r, y - r, x + r, y + r, **kwargs)
+
+
 tk.Canvas.create_circle = _create_circle
 
 
 # Current state of the app, which drives what is enabled/disabled in the UI,
 #   as well as the status message at the top of the app window.
-AppState = Enum('AppState', ['IMAGE_SELECT',
-                               'IMAGE_SEGMENT',
-                               'CONTOUR_SELECT',
-                               'CONTOUR_EDIT'])
+AppState = Enum(
+    "AppState", ["IMAGE_SELECT", "IMAGE_SEGMENT", "CONTOUR_SELECT", "CONTOUR_EDIT"]
+)
+
+
 class App(ttk.Frame):
-    """ Tkinter application for creating and displaying the water edge detection tool. """
+    """Tkinter application for creating and displaying the water edge detection tool."""
 
     def __print_debug(self, msg):
-        """ Print a debug message if the \'verbose\' argument was passed. """
+        """Print a debug message if the \'verbose\' argument was passed."""
         if args.verbose:
-            print('[Debug]:', msg)
+            print("[Debug]:", msg)
 
     def __disable_menu_options(self):
-        """ Disable all UI options except for opening a new image. """
+        """Disable all UI options except for opening a new image."""
 
-        self.__btn_segment    .config(state='disabled')
-        self.__check_polygon  .config(state='disabled')
-        self.__check_latlong  .config(state='disabled')
-        self.__entry_left_longitude     .config(state='disabled')
-        self.__entry_right_longitude    .config(state='disabled')
-        self.__entry_top_latitude      .config(state='disabled')
-        self.__entry_bottom_latitude   .config(state='disabled')
-        self.__waypnt_export           .config(state='disabled')
+        self.__btn_segment.config(state="disabled")
+        self.__check_polygon.config(state="disabled")
+        self.__check_latlong.config(state="disabled")
+        self.__entry_left_longitude.config(state="disabled")
+        self.__entry_right_longitude.config(state="disabled")
+        self.__entry_top_latitude.config(state="disabled")
+        self.__entry_bottom_latitude.config(state="disabled")
+        self.__waypnt_export.config(state="disabled")
         # self.__btn_export     .config(state='disabled')
 
-
-        self.__label_edit     .config(foreground='grey')
-        self.__label_left_longitude    .config(foreground='grey')
-        self.__label_left_latitude    .config(foreground='grey')
-        self.__label_right_longitude   .config(foreground='grey')
-        self.__label_right_latitude   .config(foreground='grey')
-        self.__label_top_latitude      .config(foreground='grey')
-        self.__label_top_longitude    .config(foreground='grey')
-        self.__label_bottom_latitude   .config(foreground='grey')
-        self.__label_bottom_longitude  .config(foreground='grey')
+        self.__label_edit.config(foreground="grey")
+        self.__label_left_longitude.config(foreground="grey")
+        self.__label_left_latitude.config(foreground="grey")
+        self.__label_right_longitude.config(foreground="grey")
+        self.__label_right_latitude.config(foreground="grey")
+        self.__label_top_latitude.config(foreground="grey")
+        self.__label_top_longitude.config(foreground="grey")
+        self.__label_bottom_latitude.config(foreground="grey")
+        self.__label_bottom_longitude.config(foreground="grey")
 
     def __enable_img_options(self):
-        """ Enable UI options related to editing and using the selected water body edge. """
+        """Enable UI options related to editing and using the selected water body edge."""
 
-        self.__check_polygon  .config(state='enabled')
-        self.__check_latlong  .config(state='enabled')
+        self.__check_polygon.config(state="enabled")
+        self.__check_latlong.config(state="enabled")
         # self.__btn_export     .config(state='enabled')
-        self.__waypnt_export  .config(state='enabled')
-        self.__btn_path       .config(state='enabled')
+        self.__waypnt_export.config(state="enabled")
+        self.__btn_path.config(state="enabled")
 
-        self.__label_edit     .config(foreground='black')
+        self.__label_edit.config(foreground="black")
 
     def __set_segmenting_state(self, new_state):
-        """ Update the state of the segmenting button. Just a wrapper for readability purposes. """
+        """Update the state of the segmenting button. Just a wrapper for readability purposes."""
 
         self.__btn_segment.config(state=new_state)
 
     def __update_state(self, new_state):
-        """ Update the state of the app and perform any resulting changes to the UI. """
+        """Update the state of the app and perform any resulting changes to the UI."""
 
         # Update the class member
         self.__app_state = new_state
 
         # Temp variable to hold status message
-        status_msg = ''
+        status_msg = ""
 
         # Perform any actions required by the new state
         if new_state == AppState.IMAGE_SELECT:
-            status_msg = 'Open an image'
+            status_msg = "Open an image"
             self.__disable_menu_options()
 
         elif new_state == AppState.IMAGE_SEGMENT:
-            status_msg = 'Segment the image, or select a new image'
-            self.__set_segmenting_state('enabled')
+            status_msg = "Segment the image, or select a new image"
+            self.__set_segmenting_state("enabled")
 
         elif new_state == AppState.CONTOUR_SELECT:
-            status_msg = 'Select a contour, or select a new image'
-            self.__set_segmenting_state('disabled')
+            status_msg = "Select a contour, or select a new image"
+            self.__set_segmenting_state("disabled")
 
         elif new_state == AppState.CONTOUR_EDIT:
-            status_msg = ('Edit the selected contour, select a new contour, '+
-                            'export the contour to CSV, or select a new image')
+            status_msg = (
+                "Edit the selected contour, select a new contour, "
+                + "export the contour to CSV, or select a new image"
+            )
             self.__enable_img_options()
 
         else:
-            self.__print_debug(f'State {new_state} has not been accounted for in update_state!')
+            self.__print_debug(
+                f"State {new_state} has not been accounted for in update_state!"
+            )
 
         # Update status message
         self.__label_status.configure(text=status_msg)
 
-
     def __on_left_mouse_button(self, event):
-        """ Event handler to be triggered by pressing the left mouse button. """
+        """Event handler to be triggered by pressing the left mouse button."""
 
-        if (self.__app_state == AppState.CONTOUR_SELECT or
-            self.__app_state == AppState.CONTOUR_EDIT):
+        if (
+            self.__app_state == AppState.CONTOUR_SELECT
+            or self.__app_state == AppState.CONTOUR_EDIT
+        ):
             # Check if we clicked on a segment
             segment_contour_full = self.__check_for_segment(event.x, event.y)
-            if segment_contour_full is None or self.__last_clicked_segment is segment_contour_full:
+            if (
+                segment_contour_full is None
+                or self.__last_clicked_segment is segment_contour_full
+            ):
                 return
-
 
             self.__last_clicked_segment = segment_contour_full
 
             # Simplify contour before drawing and storing
             # Reference: https://stackoverflow.com/questions/41879315/opencv-visualize-polygonal-curves-extracted-with-cv2-approxpolydp
-            epsilon = (2e-3)*cv2.arcLength(segment_contour_full, True)
-            self.__segment_contour = cv2.approxPolyDP(segment_contour_full, epsilon, True)
+            epsilon = (2e-3) * cv2.arcLength(segment_contour_full, True)
+            self.__segment_contour = cv2.approxPolyDP(
+                segment_contour_full, epsilon, True
+            )
 
-            self.__print_debug(f'Simplified: {self.__segment_contour.shape[0]} points')
-            self.__print_debug(f'Original: {segment_contour_full.shape[0]} points')
+            self.__print_debug(f"Simplified: {self.__segment_contour.shape[0]} points")
+            self.__print_debug(f"Original: {segment_contour_full.shape[0]} points")
 
             # Update the contour on the canvas
             self.__redraw_contour()
@@ -186,20 +193,23 @@ class App(ttk.Frame):
             self.__update_state(AppState.CONTOUR_EDIT)
 
     def __point_drag_start(self, event):
-        """ Start dragging a point in the contour that is currently being edited. """
+        """Start dragging a point in the contour that is currently being edited."""
         # Determine which point we clicked on
-        self.__clicked_point, self.__clicked_point_index = self.__check_for_contour_point(event.x, event.y)
+        (
+            self.__clicked_point,
+            self.__clicked_point_index,
+        ) = self.__check_for_contour_point(event.x, event.y)
 
         # Get its canvas ID
-        self.__clicked_point_canvas_id = self.__img_canvas.find_withtag('current')[0]
+        self.__clicked_point_canvas_id = self.__img_canvas.find_withtag("current")[0]
 
         # Capture initial position
         self.__prev_x = event.x
         self.__prev_y = event.y
-        self.__print_debug(f'Drag start! ({event.x}, {event.y})')
+        self.__print_debug(f"Drag start! ({event.x}, {event.y})")
 
     def __point_drag_motion(self, event):
-        """ Drag a point around inside the contour that is currently being edited. """
+        """Drag a point around inside the contour that is currently being edited."""
         dx = event.x - self.__prev_x
         dy = event.y - self.__prev_y
 
@@ -207,21 +217,23 @@ class App(ttk.Frame):
         self.__prev_y = event.y
 
         self.__img_canvas.move(self.__clicked_point_canvas_id, dx, dy)
-        self.__print_debug(f'Point {self.__clicked_point_index}, id {self.__clicked_point_canvas_id} update: ({event.x}, {event.y})')
+        self.__print_debug(
+            f"Point {self.__clicked_point_index}, id {self.__clicked_point_canvas_id} update: ({event.x}, {event.y})"
+        )
 
     def __point_drag_end(self, event):
-        """ Update and redraw the contour that is currently being edited. """
+        """Update and redraw the contour that is currently being edited."""
         self.__clicked_point[0][0] = event.x
         self.__clicked_point[0][1] = event.y
 
-
-        self.__print_debug(f'point {self.__clicked_point_index}, id {self.__clicked_point_canvas_id} released at {event.x}, {event.y}')
+        self.__print_debug(
+            f"point {self.__clicked_point_index}, id {self.__clicked_point_canvas_id} released at {event.x}, {event.y}"
+        )
 
         self.__redraw_contour()
 
-
     def __redraw_contour(self):
-        """ Deletes the old contour, if any, and draws a new contour on the image canvas. """
+        """Deletes the old contour, if any, and draws a new contour on the image canvas."""
 
         # Delete old polygon
         self.__img_canvas.delete(self.__contour_tag)
@@ -233,8 +245,9 @@ class App(ttk.Frame):
             contour_coords.append(point[0][1])
 
         # Draw the new polygon
-        self.__img_canvas.create_polygon(contour_coords,
-                outline='green', fill='', width=3, tags=(self.__contour_tag))
+        self.__img_canvas.create_polygon(
+            contour_coords, outline="green", fill="", width=3, tags=(self.__contour_tag)
+        )
 
         # If we are editing the contour, redraw the contour points
         if self.__allow_edit_polygon.get():
@@ -244,19 +257,24 @@ class App(ttk.Frame):
         if self.__allow_edit_latlong.get():
             self.__redraw_latlong_points()
 
-
     def __redraw_contour_points(self):
-        """ Delete old contour points and redraw new ones. """
+        """Delete old contour points and redraw new ones."""
         # Clear old points
         self.__img_canvas.delete(self.__contour_points_tag)
 
         # Draw the contour points
         for point in self.__segment_contour:
-            self.__img_canvas.create_circle(x=point[0][0], y=point[0][1], r=self.__contour_point_r,
-                    fill='blue', outline='white', tags=self.__contour_points_tag)
+            self.__img_canvas.create_circle(
+                x=point[0][0],
+                y=point[0][1],
+                r=self.__contour_point_r,
+                fill="blue",
+                outline="white",
+                tags=self.__contour_points_tag,
+            )
 
     def __redraw_latlong_points(self):
-        """ Delete old latlong bound points and redraw new ones. """
+        """Delete old latlong bound points and redraw new ones."""
         # Clear old points
         self.__img_canvas.delete(self.__contour_bounds_tag)
 
@@ -264,24 +282,27 @@ class App(ttk.Frame):
         self.__draw_bound_points()
 
     def __browse_files(self):
-        """ Spawn a file browser from which the user can select an image. """
-        filename = filedialog.askopenfilename(initialdir='.',
-                                                title='Select a File',
-                                                filetypes= (('Images', '.tif .jpg .png'),
-                                                            ('All files', '*.*'))) 
+        """Spawn a file browser from which the user can select an image."""
+        filename = filedialog.askopenfilename(
+            initialdir=".",
+            title="Select a File",
+            filetypes=(("Images", ".tif .jpg .png"), ("All files", "*.*")),
+        )
         # Check if the user cancelled instead of selecting a file
         if not filename:
-            self.__print_debug('no file selected.')
+            self.__print_debug("no file selected.")
             return
 
-        self.__img_filename.configure(text='Image: '+ filename[filename.rfind('/')+1:])
+        self.__img_filename.configure(
+            text="Image: " + filename[filename.rfind("/") + 1 :]
+        )
         with Image.open(filename) as img:
             # Update the image
             self.__img = img
             self.__tk_img = ImageTk.PhotoImage(img)
 
             # Clear all drawn shapes from canvas
-            self.__img_canvas.delete('all')
+            self.__img_canvas.delete("all")
 
             # Draw the new image
             self.__update_canvas_image()
@@ -289,15 +310,17 @@ class App(ttk.Frame):
             self.__update_state(AppState.IMAGE_SEGMENT)
 
     def __update_canvas_image(self):
-        """ Updates the image to display on the Canvas while resizing the Canvas. """
+        """Updates the image to display on the Canvas while resizing the Canvas."""
         # Resize canvas to match the new image
-        self.__img_canvas.configure(width=self.__tk_img.width(), height=self.__tk_img.height())
+        self.__img_canvas.configure(
+            width=self.__tk_img.width(), height=self.__tk_img.height()
+        )
 
         # Add image to canvas
         self.__img_canvas.create_image(0, 0, anchor="nw", image=self.__tk_img)
 
     def __segment(self):
-        """ Begin segmentation on the selected image. """
+        """Begin segmentation on the selected image."""
 
         # Check if we've selected an image yet
         if not self.__img:
@@ -306,11 +329,14 @@ class App(ttk.Frame):
 
         # Pick a device to run segmentation on
         device = torch.device(
-            'cuda'  if torch.cuda.is_available() else
-            'mps'   if torch.backends.mps.is_available() else
-            'cpu')
+            "cuda"
+            if torch.cuda.is_available()
+            else "mps"
+            if torch.backends.mps.is_available()
+            else "cpu"
+        )
 
-        self.__print_debug('Segmenting!')
+        self.__print_debug("Segmenting!")
 
         # Create a model and run it on the input image
         model = FastSAM(args.model_path)
@@ -320,22 +346,27 @@ class App(ttk.Frame):
             retina_masks=args.retina,
             imgsz=args.imgsz,
             conf=args.conf,
-            iou=args.iou)
+            iou=args.iou,
+        )
 
         # Create a prompt receiver that acts on the selected image
-        prompt_process = FastSAMVideoPrompt(np.array(self.__img), everything_results, device=device)
+        prompt_process = FastSAMVideoPrompt(
+            np.array(self.__img), everything_results, device=device
+        )
 
         # Return all segments so the user can select one manually
         annotations = prompt_process.everything_prompt()
 
         # Get output image and contours for each segment
         result, self.__segment_contour_list = prompt_process.plot(
-            annotations=annotations,
-            mask_random_color=args.random_color)
+            annotations=annotations, mask_random_color=args.random_color
+        )
 
         num_segments = len(self.__segment_contour_list)
 
-        print(f'{"Warning: " if num_segments == 0 else ""}Segmentation found {num_segments} segments.')
+        print(
+            f'{"Warning: " if num_segments == 0 else ""}Segmentation found {num_segments} segments.'
+        )
 
         # Display output image
         self.__tk_img = ImageTk.PhotoImage(Image.fromarray(result))
@@ -344,11 +375,11 @@ class App(ttk.Frame):
 
         self.__update_state(AppState.CONTOUR_SELECT)
 
-        self.__print_debug('Segmentation complete.')
+        self.__print_debug("Segmentation complete.")
         return
 
     def __check_for_segment(self, x, y):
-        """ Returns the contour of a segment, if any, at the specified (x, y) coordinate. """
+        """Returns the contour of a segment, if any, at the specified (x, y) coordinate."""
 
         selected_contour = None
 
@@ -361,9 +392,11 @@ class App(ttk.Frame):
         return selected_contour
 
     def __check_for_contour_point(self, x, y):
-        """ Returns the point and index within the currently selected 
-            contour, if any, at the specified (x, y) coordinate. """
-        self.__print_debug(f'Checking for contour point at ({x}, {y})')  # Test print statement
+        """Returns the point and index within the currently selected
+        contour, if any, at the specified (x, y) coordinate."""
+        self.__print_debug(
+            f"Checking for contour point at ({x}, {y})"
+        )  # Test print statement
 
         selected_point = None
         point_index = -1
@@ -376,73 +409,76 @@ class App(ttk.Frame):
             radius_fudge = 3
 
             # L2 norm to calculate Euclidean distance between the click and contour point
-            if cv2.norm(src1=np.array([[x,y]]), src2=point, normType=cv2.NORM_L2) < (self.__contour_point_r + radius_fudge):
+            if cv2.norm(src1=np.array([[x, y]]), src2=point, normType=cv2.NORM_L2) < (
+                self.__contour_point_r + radius_fudge
+            ):
                 selected_point = point
                 point_index = i
-                
-                self.__print_debug(f'clicked on point {point_index} at ({selected_point[0][0], selected_point[0][1]})')
+
+                self.__print_debug(
+                    f"clicked on point {point_index} at ({selected_point[0][0], selected_point[0][1]})"
+                )
                 break
 
         return selected_point, point_index
 
     def __disable_latlong_entry(self):
-        """ Disables and clears latlong checkbox, grey out labels, and disable entry fields for lat/long points. """
+        """Disables and clears latlong checkbox, grey out labels, and disable entry fields for lat/long points."""
 
         # Clear checkbox
         self.__allow_edit_latlong.set(0)
 
         # Grey out entry box labels
-        self.__label_left_longitude    .configure(foreground='grey')
-        self.__label_left_latitude    .configure(foreground='grey')
-        self.__label_right_longitude   .configure(foreground='grey')
-        self.__label_right_latitude   .configure(foreground='grey')
-        self.__label_top_latitude      .configure(foreground='grey')
-        self.__label_top_longitude    .configure(foreground='grey')
-        self.__label_bottom_latitude   .configure(foreground='grey')
-        self.__label_bottom_longitude .configure(foreground='grey')
+        self.__label_left_longitude.configure(foreground="grey")
+        self.__label_left_latitude.configure(foreground="grey")
+        self.__label_right_longitude.configure(foreground="grey")
+        self.__label_right_latitude.configure(foreground="grey")
+        self.__label_top_latitude.configure(foreground="grey")
+        self.__label_top_longitude.configure(foreground="grey")
+        self.__label_bottom_latitude.configure(foreground="grey")
+        self.__label_bottom_longitude.configure(foreground="grey")
 
         # Disable latlong entry boxes
-        self.__entry_left_longitude     .configure(state='disabled')
-        self.__entry_left_latitude      .configure(state='disabled')
-        self.__entry_right_longitude    .configure(state='disabled')
-        self.__entry_right_latitude   .configure(state='disabled')
-        self.__entry_top_latitude      .configure(state='disabled')
-        self.__entry_top_longitude    .configure(state='disabled')
-        self.__entry_bottom_latitude   .configure(state='disabled')
-        self.__entry_bottom_longitude .configure(state='disabled')
+        self.__entry_left_longitude.configure(state="disabled")
+        self.__entry_left_latitude.configure(state="disabled")
+        self.__entry_right_longitude.configure(state="disabled")
+        self.__entry_right_latitude.configure(state="disabled")
+        self.__entry_top_latitude.configure(state="disabled")
+        self.__entry_top_longitude.configure(state="disabled")
+        self.__entry_bottom_latitude.configure(state="disabled")
+        self.__entry_bottom_longitude.configure(state="disabled")
 
     def __enable_latlong_entry(self):
-        """ Enable polygon checkbox, revert greying out of labels, and enable entry fields for lat/long points. """
+        """Enable polygon checkbox, revert greying out of labels, and enable entry fields for lat/long points."""
 
         # Enable checkbox
-        self.__check_latlong.configure(state='enabled')
+        self.__check_latlong.configure(state="enabled")
 
         # Revert greying out of entry box labels
-        self.__label_left_longitude     .configure(foreground='black')
-        self.__label_left_latitude      .configure(foreground='black')
-        self.__label_right_longitude    .configure(foreground='black')
-        self.__label_right_latitude   .configure(foreground='black')
-        self.__label_top_latitude      .configure(foreground='black')
-        self.__label_top_longitude    .configure(foreground='black')
-        self.__label_bottom_latitude   .configure(foreground='black')
-        self.__label_bottom_longitude   .configure(foreground='black')
+        self.__label_left_longitude.configure(foreground="black")
+        self.__label_left_latitude.configure(foreground="black")
+        self.__label_right_longitude.configure(foreground="black")
+        self.__label_right_latitude.configure(foreground="black")
+        self.__label_top_latitude.configure(foreground="black")
+        self.__label_top_longitude.configure(foreground="black")
+        self.__label_bottom_latitude.configure(foreground="black")
+        self.__label_bottom_longitude.configure(foreground="black")
 
         # Enable latlong entry boxes
-        self.__entry_left_longitude    .configure(state='enabled')
-        self.__entry_left_latitude    .configure(state='enabled')
-        self.__entry_right_longitude   .configure(state='enabled')
-        self.__entry_right_latitude   .configure(state='enabled')
-        self.__entry_top_latitude      .configure(state='enabled')
-        self.__entry_top_longitude    .configure(state='enabled')
-        self.__entry_bottom_latitude   .configure(state='enabled')
-        self.__entry_bottom_longitude .configure(state='enabled')
-
+        self.__entry_left_longitude.configure(state="enabled")
+        self.__entry_left_latitude.configure(state="enabled")
+        self.__entry_right_longitude.configure(state="enabled")
+        self.__entry_right_latitude.configure(state="enabled")
+        self.__entry_top_latitude.configure(state="enabled")
+        self.__entry_top_longitude.configure(state="enabled")
+        self.__entry_bottom_latitude.configure(state="enabled")
+        self.__entry_bottom_longitude.configure(state="enabled")
 
     def __polygon_edit_changed(self):
-        """ Respond to polygon editing being enabled or disabled. """
+        """Respond to polygon editing being enabled or disabled."""
 
         editing_enabled = self.__allow_edit_polygon.get()
-        state_msg = 'Polygon editing ' + ('enabled' if editing_enabled else 'disabled')
+        state_msg = "Polygon editing " + ("enabled" if editing_enabled else "disabled")
         self.__print_debug(state_msg)
 
         # Check if we deselected
@@ -459,17 +495,23 @@ class App(ttk.Frame):
 
         # Draw the contour points
         for point in self.__segment_contour:
-            self.__img_canvas.create_circle(x=point[0][0], y=point[0][1], r=self.__contour_point_r,
-                    fill='blue', outline='white', tags=self.__contour_points_tag)
+            self.__img_canvas.create_circle(
+                x=point[0][0],
+                y=point[0][1],
+                r=self.__contour_point_r,
+                fill="blue",
+                outline="white",
+                tags=self.__contour_points_tag,
+            )
 
         return
 
     def __latlong_edit_changed(self):
-        """ Respond to latlong editing being enabled or disabled. """
+        """Respond to latlong editing being enabled or disabled."""
 
         # Check whether we selected or deselected
         editing_enabled = self.__allow_edit_latlong.get()
-        state_msg = 'Lat-long editing ' + ('enabled' if editing_enabled else 'disabled')
+        state_msg = "Lat-long editing " + ("enabled" if editing_enabled else "disabled")
         self.__print_debug(state_msg)
 
         # Check if we deselected
@@ -492,13 +534,13 @@ class App(ttk.Frame):
         self.__enable_latlong_entry()
 
     def __draw_bound_points(self):
-        """ Draw left/right/top/bottom points for the selected contour. """
+        """Draw left/right/top/bottom points for the selected contour."""
 
         # Find left/right/top/bottom bound points
-        left    = self.__segment_contour[0]
-        right   = self.__segment_contour[0]
-        top     = self.__segment_contour[0]
-        bottom  = self.__segment_contour[0]
+        left = self.__segment_contour[0]
+        right = self.__segment_contour[0]
+        top = self.__segment_contour[0]
+        bottom = self.__segment_contour[0]
 
         for point in self.__segment_contour:
             if point[0][0] < left[0][0]:
@@ -511,49 +553,79 @@ class App(ttk.Frame):
                 bottom = point
 
         # Draw the bound points
-        bounds_radius   = 5
-        bounds_outline  = 'black'
-        bounds_fill     = 'cyan'
-        self.__img_canvas.create_circle(left  [0][0], left    [0][1], bounds_radius, outline=bounds_outline, fill=bounds_fill, tags=(self.__contour_bounds_tag))
-        self.__img_canvas.create_circle(right [0][0], right   [0][1], bounds_radius, outline=bounds_outline, fill=bounds_fill, tags=(self.__contour_bounds_tag))
-        self.__img_canvas.create_circle(top   [0][0], top     [0][1], bounds_radius, outline=bounds_outline, fill=bounds_fill, tags=(self.__contour_bounds_tag))
-        self.__img_canvas.create_circle(bottom[0][0], bottom  [0][1], bounds_radius, outline=bounds_outline, fill=bounds_fill, tags=(self.__contour_bounds_tag))
+        bounds_radius = 5
+        bounds_outline = "black"
+        bounds_fill = "cyan"
+        self.__img_canvas.create_circle(
+            left[0][0],
+            left[0][1],
+            bounds_radius,
+            outline=bounds_outline,
+            fill=bounds_fill,
+            tags=(self.__contour_bounds_tag),
+        )
+        self.__img_canvas.create_circle(
+            right[0][0],
+            right[0][1],
+            bounds_radius,
+            outline=bounds_outline,
+            fill=bounds_fill,
+            tags=(self.__contour_bounds_tag),
+        )
+        self.__img_canvas.create_circle(
+            top[0][0],
+            top[0][1],
+            bounds_radius,
+            outline=bounds_outline,
+            fill=bounds_fill,
+            tags=(self.__contour_bounds_tag),
+        )
+        self.__img_canvas.create_circle(
+            bottom[0][0],
+            bottom[0][1],
+            bounds_radius,
+            outline=bounds_outline,
+            fill=bounds_fill,
+            tags=(self.__contour_bounds_tag),
+        )
 
         self.__contour_bounds = {
             "left": left[0],
             "right": right[0],
             "top": top[0],
-            "bottom": bottom[0]
-        }   # Sayeed
-
+            "bottom": bottom[0],
+        }  # Sayeed
 
     def __validate_entry_inputs(self):
-        """ Verifies that text entries can be converted to floats. """
+        """Verifies that text entries can be converted to floats."""
         get_values = [
-            self.__entry_left_longitude.get(), self.__entry_right_longitude.get(),
-            self.__entry_top_latitude.get(), self.__entry_bottom_latitude.get()
+            self.__entry_left_longitude.get(),
+            self.__entry_right_longitude.get(),
+            self.__entry_top_latitude.get(),
+            self.__entry_bottom_latitude.get(),
         ]
-        names = ['left longitude', 'right longitude', 'top latitude', 'bottom latitude']
+        names = ["left longitude", "right longitude", "top latitude", "bottom latitude"]
 
         for i, value in enumerate(get_values):
             try:
                 float(value.get())
             except ValueError:
-                print(f'{name} is invalid.')
+                print(f"{name} is invalid.")
                 return False
 
         return True
 
-
     def __generate_path(self):
-        """ Generates and renders a path returned by the path planner. """
+        """Generates and renders a path returned by the path planner."""
         self.__clear_path()
 
-        points_list = np.array([[point[0][0], point[0][1]] for point in self.__segment_contour])
+        points_list = np.array(
+            [[point[0][0], point[0][1]] for point in self.__segment_contour]
+        )
         if args.verbose:
             # Save the segment contour with "Latitude" and "Longitude" in the first row
-            self.__print_debug('Saving segment contour to segment_contour.csv')
-            with open('segment_countour.csv', 'w', newline='') as f:
+            self.__print_debug("Saving segment contour to segment_contour.csv")
+            with open("segment_countour.csv", "w", newline="") as f:
                 writer = csv.writer(f)
                 writer.writerow(["Latitude", "Longitude"])
                 writer.writerows(points_list)
@@ -569,37 +641,41 @@ class App(ttk.Frame):
         # Generate a path
         pp = PathPlanner()
         pp.get_bounding_polygon(bounding_polygon=points_list)
-        waypoint_coords = pp.path_region(path_dist_ratio=self.path_dist_ratio, tol_factor=self.tol_factor, is_plot=False)
+        waypoint_coords = pp.path_region(
+            path_dist_ratio=self.path_dist_ratio,
+            tol_factor=self.tol_factor,
+            is_plot=False,
+        )
         waypoint_coords = [item for sublist in waypoint_coords for item in sublist]
         # save the generated path to a csv
         if args.verbose:
-            np.savetxt('generated_path.csv', waypoint_coords, delimiter=',', fmt='%f')
+            np.savetxt("generated_path.csv", waypoint_coords, delimiter=",", fmt="%f")
 
         updated_generated_path = accel_del_waypoints(waypoint_coords)
         # Store the generated path
-        self.generated_path = updated_generated_path 
+        self.generated_path = updated_generated_path
 
         #  Print the generated path
         self.__print_debug("Generated Path:")
         self.__print_debug(self.generated_path)
 
         # Draw the path
-        self.__img_canvas.create_line(waypoint_coords, fill='red', width=2, tag='path')
+        self.__img_canvas.create_line(waypoint_coords, fill="red", width=2, tag="path")
 
     def __clear_path(self):
-        """ Clears the previously generated path from the canvas. """
-        self.__img_canvas.delete('path')  # Assuming 'path' is the tag used for the path
+        """Clears the previously generated path from the canvas."""
+        self.__img_canvas.delete("path")  # Assuming 'path' is the tag used for the path
 
     def __pp_to_latlongturn(self):
-        """ Generate a list of latitude/longitude/turn points from the generated path planned. """
+        """Generate a list of latitude/longitude/turn points from the generated path planned."""
 
         # lat/long coordinate boundaries (input by user)
 
         long_left = float(self.__entry_left_longitude.get())
-        lat_left  = float(self.__entry_left_latitude.get())
+        lat_left = float(self.__entry_left_latitude.get())
 
         long_right = float(self.__entry_right_longitude.get())
-        lat_right  = float(self.__entry_right_latitude.get())
+        lat_right = float(self.__entry_right_latitude.get())
 
         lat_top = float(self.__entry_top_latitude.get())
         long_top = float(self.__entry_top_longitude.get())
@@ -628,87 +704,92 @@ class App(ttk.Frame):
 
         generated_path = self.generated_path
 
-
-        lat_long_interpolation = bi_linear_interpolation(reference_points, generated_path)
+        lat_long_interpolation = bi_linear_interpolation(
+            reference_points, generated_path
+        )
         lat_long_turn = turning_points(generated_path, lat_long_interpolation)
 
         return lat_long_turn
 
     def __mission_planner_waypoint(self, lat_long_turn):
-        """Function created to generate a .waypoint file that contains details pertaining to the drone's autonomous planned path. 
+        """Function created to generate a .waypoint file that contains details pertaining to the drone's autonomous planned path.
         The file generated is to be imported into Mission Planner application.
-        
-        Args: 
+
+        Args:
             lat_long_turn: 3 column numpy array containing information related to each waypoint's latitude, longitude, and turn status.
-            
-        Returns: 
+
+        Returns:
             waypoints_data: .waypoints file that contains a 9 column array containing parameter information for drone's waypoints."""
 
-        waypoints_data = plan_mission(lat_long_turn)  # associated button for export : line 810
+        waypoints_data = plan_mission(
+            lat_long_turn
+        )  # associated button for export : line 810
 
         return waypoints_data
 
-
     def __export_to_waypoint_file(self):
-        """Exports Henry's Mission Planner Code Data to a WayPoint File When Export Button Is Pressed. """
+        """Exports Henry's Mission Planner Code Data to a WayPoint File When Export Button Is Pressed."""
 
         if not self.__validate_entry_inputs():
             return
 
-        self.__print_debug('exporting!')
+        self.__print_debug("exporting!")
         # lat_long_turn_data = self.__lat_long_interpolation()  # for use when accurate lat, long, interpolation is ready
 
         lat_long_turn_data = self.__pp_to_latlongturn()
-        mission_planner_way_points_data = self.__mission_planner_waypoint(lat_long_turn_data)
+        mission_planner_way_points_data = self.__mission_planner_waypoint(
+            lat_long_turn_data
+        )
 
         # Write output to '.waypoints' file
 
         try:
             # Open the file in write mode
-            with open(args.output_filename, 'w', encoding='UTF-8', newline='') as file:
-                file.write('QGC WPL 110\n')
+            with open(args.output_filename, "w", encoding="UTF-8", newline="") as file:
+                file.write("QGC WPL 110\n")
 
                 for row in mission_planner_way_points_data:
-                    line = '\t'.join(map(str, row))  # Convert each element to string and join with tab
+                    line = "\t".join(
+                        map(str, row)
+                    )  # Convert each element to string and join with tab
                     file.write(f"{line}\n")
 
-            print(f'Waypoints successfully exported to {args.output_filename}')
+            print(f"Waypoints successfully exported to {args.output_filename}")
         except Exception as e:
-            self.__print_debug(f'Failed to export waypoints: {e}')
+            self.__print_debug(f"Failed to export waypoints: {e}")
 
     def update_path_dist_ratio(self, event):
         """Set the path_dist_ratio value."""
         try:
             self.path_dist_ratio = float(self.__entry_path_dist_ratio.get())
-            print(f'path_dist_ratio set to {self.path_dist_ratio}')
-            #self.__generate_path()
+            print(f"path_dist_ratio set to {self.path_dist_ratio}")
+            # self.__generate_path()
         except ValueError:
-            print('Invalid value for path_dist_ratio.')
+            print("Invalid value for path_dist_ratio.")
 
     def update_tol_factor(self, event):
         """Set the tol_factor value."""
         try:
             self.tol_factor = float(self.__entry_tol_factor.get())
-            print(f'tol_factor set to {self.tol_factor}')
-            #self.__generate_path()
+            print(f"tol_factor set to {self.tol_factor}")
+            # self.__generate_path()
         except ValueError:
-            print('Invalid value for tol_factor.')
-
+            print("Invalid value for tol_factor.")
 
     def __init__(self, root):
         ttk.Frame.__init__(self, root)
         self.pack()
 
-        self.winfo_toplevel().title('APRILab Water Body Detection Tool')
+        self.winfo_toplevel().title("APRILab Water Body Detection Tool")
 
         # parameters for planner
         self.path_dist_ratio = None
         self.tol_factor = None
 
         # Canvas element tags as variables to mitigate typos
-        self.__contour_tag        = 'contour'
-        self.__contour_bounds_tag = 'bounds'
-        self.__contour_points_tag = 'points'
+        self.__contour_tag = "contour"
+        self.__contour_bounds_tag = "bounds"
+        self.__contour_points_tag = "points"
 
         # UI Constants
         self.__contour_point_r = 5
@@ -716,152 +797,267 @@ class App(ttk.Frame):
         # State variables
         self.__app_state = AppState(AppState.IMAGE_SELECT)
 
-        self.__allow_edit_polygon   = tk.BooleanVar(value=False)
-        self.__allow_edit_latlong   = tk.BooleanVar(value=False)
+        self.__allow_edit_polygon = tk.BooleanVar(value=False)
+        self.__allow_edit_latlong = tk.BooleanVar(value=False)
 
         self.__last_clicked_segment = None
 
         # High-level frames
-        self.__frame_menu     = ttk.Frame(self)
-        self.__frame_status   = ttk.Frame(self)
-        self.__frame_canvas   = ttk.Frame(self)
+        self.__frame_menu = ttk.Frame(self)
+        self.__frame_status = ttk.Frame(self)
+        self.__frame_canvas = ttk.Frame(self)
 
-        self.__frame_menu     .grid(row=0, column=0, rowspan=2,   sticky='nsew') 
-        self.__frame_status   .grid(row=0, column=1,              sticky='nsew') 
-        self.__frame_canvas   .grid(row=1, column=1,              sticky='nsew') 
+        self.__frame_menu.grid(row=0, column=0, rowspan=2, sticky="nsew")
+        self.__frame_status.grid(row=0, column=1, sticky="nsew")
+        self.__frame_canvas.grid(row=1, column=1, sticky="nsew")
 
         self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(1, weight=1)
 
-
         # Menu frame
-        self.__btn_sel_img    = ttk.Button      (self.__frame_menu, text='Select image file', command=self.__browse_files)
-        self.__btn_segment    = ttk.Button      (self.__frame_menu, text='Segment Image',     command=self.__segment)
-        self.__label_edit     = ttk.Label       (self.__frame_menu, text='Edit:')
-        self.__check_polygon  = ttk.Checkbutton (self.__frame_menu, text='Bounding polygon',  command=self.__polygon_edit_changed,     variable=self.__allow_edit_polygon)
-        self.__check_latlong  = ttk.Checkbutton (self.__frame_menu, text='Lat-long points',   command=self.__latlong_edit_changed,  variable=self.__allow_edit_latlong)
-        self.__label_left_latitude = ttk.Label(self.__frame_menu, text='Left - Latitude', foreground='grey')
-        self.__entry_left_latitude = ttk.Entry(self.__frame_menu, state='disabled')
-        self.__label_left_longitude     = ttk.Label       (self.__frame_menu, text='Left - Longitude',      foreground='grey')
-        self.__entry_left_longitude     = ttk.Entry       (self.__frame_menu, state='disabled')
-        self.__label_right_latitude = ttk.Label(self.__frame_menu, text='Right - Latitude', foreground='grey')
-        self.__entry_right_latitude = ttk.Entry(self.__frame_menu, state='disabled')
-        self.__label_right_longitude    = ttk.Label       (self.__frame_menu, text='Right - Longitude',     foreground='grey')
-        self.__entry_right_longitude    = ttk.Entry       (self.__frame_menu, state='disabled')
-        self.__label_top_latitude      = ttk.Label       (self.__frame_menu, text='Top - Latitude',        foreground='grey')
-        self.__entry_top_latitude      = ttk.Entry       (self.__frame_menu, state='disabled')
-        self.__label_top_longitude = ttk.Label(self.__frame_menu, text='Top - Longitude', foreground='grey')
-        self.__entry_top_longitude = ttk.Entry(self.__frame_menu, state='disabled')
-        self.__label_bottom_latitude   = ttk.Label       (self.__frame_menu, text='Bottom - Latitude',    foreground='grey')
-        self.__entry_bottom_latitude   = ttk.Entry       (self.__frame_menu, state='disabled')
-        self.__label_bottom_longitude = ttk.Label(self.__frame_menu, text='Bottom - Longitude', foreground='grey')
-        self.__entry_bottom_longitude = ttk.Entry(self.__frame_menu, state='disabled')
-        self.__btn_path       = ttk.Button      (self.__frame_menu, text='Generate Path',     command=self.__generate_path, state='disabled') 
-        self.__waypnt_export  = ttk.Button       (self.__frame_menu, text='Export Waypoint File', command=self.__export_to_waypoint_file)
-        self.__label_path_dist_ratio = ttk.Label(self.__frame_menu, text='Path Dist Ratio')
+        self.__btn_sel_img = ttk.Button(
+            self.__frame_menu, text="Select image file", command=self.__browse_files
+        )
+        self.__btn_segment = ttk.Button(
+            self.__frame_menu, text="Segment Image", command=self.__segment
+        )
+        self.__label_edit = ttk.Label(self.__frame_menu, text="Edit:")
+        self.__check_polygon = ttk.Checkbutton(
+            self.__frame_menu,
+            text="Bounding polygon",
+            command=self.__polygon_edit_changed,
+            variable=self.__allow_edit_polygon,
+        )
+        self.__check_latlong = ttk.Checkbutton(
+            self.__frame_menu,
+            text="Lat-long points",
+            command=self.__latlong_edit_changed,
+            variable=self.__allow_edit_latlong,
+        )
+        self.__label_left_latitude = ttk.Label(
+            self.__frame_menu, text="Left - Latitude", foreground="grey"
+        )
+        self.__entry_left_latitude = ttk.Entry(self.__frame_menu, state="disabled")
+        self.__label_left_longitude = ttk.Label(
+            self.__frame_menu, text="Left - Longitude", foreground="grey"
+        )
+        self.__entry_left_longitude = ttk.Entry(self.__frame_menu, state="disabled")
+        self.__label_right_latitude = ttk.Label(
+            self.__frame_menu, text="Right - Latitude", foreground="grey"
+        )
+        self.__entry_right_latitude = ttk.Entry(self.__frame_menu, state="disabled")
+        self.__label_right_longitude = ttk.Label(
+            self.__frame_menu, text="Right - Longitude", foreground="grey"
+        )
+        self.__entry_right_longitude = ttk.Entry(self.__frame_menu, state="disabled")
+        self.__label_top_latitude = ttk.Label(
+            self.__frame_menu, text="Top - Latitude", foreground="grey"
+        )
+        self.__entry_top_latitude = ttk.Entry(self.__frame_menu, state="disabled")
+        self.__label_top_longitude = ttk.Label(
+            self.__frame_menu, text="Top - Longitude", foreground="grey"
+        )
+        self.__entry_top_longitude = ttk.Entry(self.__frame_menu, state="disabled")
+        self.__label_bottom_latitude = ttk.Label(
+            self.__frame_menu, text="Bottom - Latitude", foreground="grey"
+        )
+        self.__entry_bottom_latitude = ttk.Entry(self.__frame_menu, state="disabled")
+        self.__label_bottom_longitude = ttk.Label(
+            self.__frame_menu, text="Bottom - Longitude", foreground="grey"
+        )
+        self.__entry_bottom_longitude = ttk.Entry(self.__frame_menu, state="disabled")
+        self.__btn_path = ttk.Button(
+            self.__frame_menu,
+            text="Generate Path",
+            command=self.__generate_path,
+            state="disabled",
+        )
+        self.__waypnt_export = ttk.Button(
+            self.__frame_menu,
+            text="Export Waypoint File",
+            command=self.__export_to_waypoint_file,
+        )
+        self.__label_path_dist_ratio = ttk.Label(
+            self.__frame_menu, text="Path Dist Ratio"
+        )
         self.__entry_path_dist_ratio = ttk.Entry(self.__frame_menu)
 
-        self.__label_tol_factor = ttk.Label(self.__frame_menu, text='Tol Factor')
+        self.__label_tol_factor = ttk.Label(self.__frame_menu, text="Tol Factor")
         self.__entry_tol_factor = ttk.Entry(self.__frame_menu)
 
         # Status frame
-        self.__label_status   = ttk.Label       (self.__frame_status, text='Open an image')
-        self.__img_filename   = ttk.Label       (self.__frame_status, text='Image: none')
+        self.__label_status = ttk.Label(self.__frame_status, text="Open an image")
+        self.__img_filename = ttk.Label(self.__frame_status, text="Image: none")
 
         # Canvas frame
-        self.__img_canvas     = tk.Canvas       (self.__frame_canvas)
+        self.__img_canvas = tk.Canvas(self.__frame_canvas)
 
         # Gridding - menu frame
-        menu_padx        = 5
-        menu_pady_short  = 2
-        menu_pady_long   = 5
-        self.__btn_sel_img    .grid(row=0,    column=0, padx=menu_padx, pady=menu_pady_short, sticky='nsew')
-        self.__btn_segment    .grid(row=1,    column=0, padx=menu_padx, pady=menu_pady_short, sticky='nsew')
-        self.__label_edit     .grid(row=2,    column=0, padx=menu_padx, pady=menu_pady_long,  sticky='nsew')
-        self.__check_polygon  .grid(row=3,    column=0, padx=menu_padx, pady=menu_pady_long,  sticky='nsew')
-        self.__check_latlong  .grid(row=4,    column=0, padx=menu_padx, pady=menu_pady_long,  sticky='nsew')
+        menu_padx = 5
+        menu_pady_short = 2
+        menu_pady_long = 5
+        self.__btn_sel_img.grid(
+            row=0, column=0, padx=menu_padx, pady=menu_pady_short, sticky="nsew"
+        )
+        self.__btn_segment.grid(
+            row=1, column=0, padx=menu_padx, pady=menu_pady_short, sticky="nsew"
+        )
+        self.__label_edit.grid(
+            row=2, column=0, padx=menu_padx, pady=menu_pady_long, sticky="nsew"
+        )
+        self.__check_polygon.grid(
+            row=3, column=0, padx=menu_padx, pady=menu_pady_long, sticky="nsew"
+        )
+        self.__check_latlong.grid(
+            row=4, column=0, padx=menu_padx, pady=menu_pady_long, sticky="nsew"
+        )
 
-        self.__label_left_latitude     .grid(row=5, column=0, padx=menu_padx, pady=menu_pady_short, sticky='nsew')
-        self.__entry_left_latitude     .grid(row=6, column=0, padx=menu_padx, pady=menu_pady_long, sticky='nsew')
+        self.__label_left_latitude.grid(
+            row=5, column=0, padx=menu_padx, pady=menu_pady_short, sticky="nsew"
+        )
+        self.__entry_left_latitude.grid(
+            row=6, column=0, padx=menu_padx, pady=menu_pady_long, sticky="nsew"
+        )
 
-        self.__label_left_longitude    .grid(row=7,    column=0, padx=menu_padx, pady=menu_pady_short, sticky='nsew')
-        self.__entry_left_longitude    .grid(row=8,    column=0, padx=menu_padx, pady=menu_pady_long,  sticky='nsew')
+        self.__label_left_longitude.grid(
+            row=7, column=0, padx=menu_padx, pady=menu_pady_short, sticky="nsew"
+        )
+        self.__entry_left_longitude.grid(
+            row=8, column=0, padx=menu_padx, pady=menu_pady_long, sticky="nsew"
+        )
 
-        self.__label_right_latitude    .grid(row=9, column=0, padx=menu_padx, pady=menu_pady_short, sticky='nsew')
-        self.__entry_right_latitude    .grid(row=10, column=0, padx=menu_padx, pady=menu_pady_long, sticky='nsew')
+        self.__label_right_latitude.grid(
+            row=9, column=0, padx=menu_padx, pady=menu_pady_short, sticky="nsew"
+        )
+        self.__entry_right_latitude.grid(
+            row=10, column=0, padx=menu_padx, pady=menu_pady_long, sticky="nsew"
+        )
 
-        self.__label_right_longitude   .grid(row=11,    column=0, padx=menu_padx, pady=menu_pady_short, sticky='nsew')
-        self.__entry_right_longitude   .grid(row=12,    column=0, padx=menu_padx, pady=menu_pady_long,  sticky='nsew')
+        self.__label_right_longitude.grid(
+            row=11, column=0, padx=menu_padx, pady=menu_pady_short, sticky="nsew"
+        )
+        self.__entry_right_longitude.grid(
+            row=12, column=0, padx=menu_padx, pady=menu_pady_long, sticky="nsew"
+        )
 
-        self.__label_top_latitude      .grid(row=13,    column=0, padx=menu_padx, pady=menu_pady_short, sticky='nsew')
-        self.__entry_top_latitude      .grid(row=14,   column=0, padx=menu_padx, pady=menu_pady_long,  sticky='nsew')
+        self.__label_top_latitude.grid(
+            row=13, column=0, padx=menu_padx, pady=menu_pady_short, sticky="nsew"
+        )
+        self.__entry_top_latitude.grid(
+            row=14, column=0, padx=menu_padx, pady=menu_pady_long, sticky="nsew"
+        )
 
-        self.__label_top_longitude    .grid(row=15, column=0, padx=menu_padx, pady=menu_pady_short, sticky='nsew')
-        self.__entry_top_longitude    .grid(row=16, column=0, padx=menu_padx, pady=menu_pady_long, sticky='nsew')
+        self.__label_top_longitude.grid(
+            row=15, column=0, padx=menu_padx, pady=menu_pady_short, sticky="nsew"
+        )
+        self.__entry_top_longitude.grid(
+            row=16, column=0, padx=menu_padx, pady=menu_pady_long, sticky="nsew"
+        )
 
-        self.__label_bottom_latitude   .grid(row=17,   column=0, padx=menu_padx, pady=menu_pady_short, sticky='nsew')
-        self.__entry_bottom_latitude   .grid(row=18,   column=0, padx=menu_padx, pady=menu_pady_long,  sticky='nsew')
+        self.__label_bottom_latitude.grid(
+            row=17, column=0, padx=menu_padx, pady=menu_pady_short, sticky="nsew"
+        )
+        self.__entry_bottom_latitude.grid(
+            row=18, column=0, padx=menu_padx, pady=menu_pady_long, sticky="nsew"
+        )
 
-        self.__label_bottom_longitude .grid(row=19, column=0, padx=menu_padx, pady=menu_pady_short, sticky='nsew')
-        self.__entry_bottom_longitude .grid(row=20, column=0, padx=menu_padx, pady=menu_pady_long, sticky='nsew')
+        self.__label_bottom_longitude.grid(
+            row=19, column=0, padx=menu_padx, pady=menu_pady_short, sticky="nsew"
+        )
+        self.__entry_bottom_longitude.grid(
+            row=20, column=0, padx=menu_padx, pady=menu_pady_long, sticky="nsew"
+        )
 
-        self.__label_path_dist_ratio.grid(row=21, column=0, padx=menu_padx, pady=menu_pady_short, sticky='nsew')
-        self.__entry_path_dist_ratio.grid(row=22, column=0, padx=menu_padx, pady=menu_pady_short, sticky='nsew')
+        self.__label_path_dist_ratio.grid(
+            row=21, column=0, padx=menu_padx, pady=menu_pady_short, sticky="nsew"
+        )
+        self.__entry_path_dist_ratio.grid(
+            row=22, column=0, padx=menu_padx, pady=menu_pady_short, sticky="nsew"
+        )
 
-        self.__label_tol_factor.grid(row=23, column=0, padx=menu_padx, pady=menu_pady_short, sticky='nsew')
-        self.__entry_tol_factor.grid(row=24, column=0, padx=menu_padx, pady=menu_pady_short, sticky='nsew')
+        self.__label_tol_factor.grid(
+            row=23, column=0, padx=menu_padx, pady=menu_pady_short, sticky="nsew"
+        )
+        self.__entry_tol_factor.grid(
+            row=24, column=0, padx=menu_padx, pady=menu_pady_short, sticky="nsew"
+        )
 
-        self.__entry_path_dist_ratio.bind('<KeyRelease>', self.update_path_dist_ratio)
-        self.__entry_tol_factor.bind('<KeyRelease>', self.update_tol_factor)
+        self.__entry_path_dist_ratio.bind("<KeyRelease>", self.update_path_dist_ratio)
+        self.__entry_tol_factor.bind("<KeyRelease>", self.update_tol_factor)
 
         # self.__btn_export     .grid(row=21,   column=0, padx=menu_padx, pady=menu_pady_long,  sticky='nsew')
-        self.__btn_path       .grid(row=25,   column=0, padx=menu_padx, pady=menu_pady_long,  sticky='nsew')
+        self.__btn_path.grid(
+            row=25, column=0, padx=menu_padx, pady=menu_pady_long, sticky="nsew"
+        )
 
-        self.__waypnt_export  .grid(row=26,   column=0, padx=menu_padx, pady=menu_pady_long,  sticky='nsew')
+        self.__waypnt_export.grid(
+            row=26, column=0, padx=menu_padx, pady=menu_pady_long, sticky="nsew"
+        )
 
         # Gridding - status frame
-        self.__label_status   .grid(row=0, column=0, padx=5, pady=5, sticky='nsew')
-        self.__img_filename   .grid(row=0, column=1, padx=10, pady=5, sticky='nse')
+        self.__label_status.grid(row=0, column=0, padx=5, pady=5, sticky="nsew")
+        self.__img_filename.grid(row=0, column=1, padx=10, pady=5, sticky="nse")
 
         self.__frame_status.rowconfigure(0, weight=1)
         self.__frame_status.columnconfigure(1, weight=1)
 
         # Gridding - canvas frame
-        self.__img_canvas     .grid(row=0, column=0)
+        self.__img_canvas.grid(row=0, column=0)
 
         # Event handler binding
-        self.__img_canvas.bind('<Button-1>', self.__on_left_mouse_button)
-        self.__img_canvas.tag_bind(self.__contour_points_tag, '<Button-1>', self.__point_drag_start)
-        self.__img_canvas.tag_bind(self.__contour_points_tag, '<B1-Motion>', self.__point_drag_motion)
-        self.__img_canvas.tag_bind(self.__contour_points_tag, '<ButtonRelease-1>', self.__point_drag_end)
+        self.__img_canvas.bind("<Button-1>", self.__on_left_mouse_button)
+        self.__img_canvas.tag_bind(
+            self.__contour_points_tag, "<Button-1>", self.__point_drag_start
+        )
+        self.__img_canvas.tag_bind(
+            self.__contour_points_tag, "<B1-Motion>", self.__point_drag_motion
+        )
+        self.__img_canvas.tag_bind(
+            self.__contour_points_tag, "<ButtonRelease-1>", self.__point_drag_end
+        )
 
         # Trigger UI update for initial state
         self.__update_state(self.__app_state)
 
 
 def parse_args():
-    """ Use an ArgumentParser to collect arguments into variables. """
+    """Use an ArgumentParser to collect arguments into variables."""
     parser = argparse.ArgumentParser()
 
     # Note that many defaults are taken from FastSAM source code as of the time of cloning their repo.
-    #parser.add_argument('-d',   '--dark_theme',     type=bool,  default=False,  action=argparse.BooleanOptionalAction)
-    parser.add_argument('-v',   '--verbose',        type=bool,  default=False,  action=argparse.BooleanOptionalAction)
-    parser.add_argument('-m',   '--model_path',     type=str,   default='./weights/FastSAM-x.pt')
-    parser.add_argument(        '--retina',         type=bool,  default=True)
-    parser.add_argument(        '--imgsz',          type=int,   default=1024)
-    parser.add_argument(        '--conf',           type=float, default=0.4)
-    parser.add_argument(        '--iou',            type=float, default=0.9)
-    parser.add_argument(        '--random_color',   type=bool,  default=True,   action=argparse.BooleanOptionalAction)
-    parser.add_argument('-o',   '--output_filename', type=str,  default='Long_Core_Mission_Matrix22_test_0_turn_v12.waypoints')
+    # parser.add_argument('-d',   '--dark_theme',     type=bool,  default=False,  action=argparse.BooleanOptionalAction)
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        type=bool,
+        default=False,
+        action=argparse.BooleanOptionalAction,
+    )
+    parser.add_argument(
+        "-m", "--model_path", type=str, default="./weights/FastSAM-x.pt"
+    )
+    parser.add_argument("--retina", type=bool, default=True)
+    parser.add_argument("--imgsz", type=int, default=1024)
+    parser.add_argument("--conf", type=float, default=0.4)
+    parser.add_argument("--iou", type=float, default=0.9)
+    parser.add_argument(
+        "--random_color", type=bool, default=True, action=argparse.BooleanOptionalAction
+    )
+    parser.add_argument(
+        "-o",
+        "--output_filename",
+        type=str,
+        default="Long_Core_Mission_Matrix22_test_0_turn_v12.waypoints",
+    )
     return parser.parse_args()
 
 
 def main(args):
-    """ Launches the GUI. """
+    """Launches the GUI."""
     root = tk.Tk()
     root.minsize(400, 200)
 
-    #if(args.dark_theme):
+    # if(args.dark_theme):
     #    root.tk.call('lappend', 'auto_path', '/home/blake/Documents/GitHub/FastSAM/FastSAMUI/themes/awthemes-10.4.0')
     #    root.tk.call('package', 'require', 'awdark')
     #    s = ttk.Style()
@@ -870,7 +1066,8 @@ def main(args):
 
     app = App(root)
     root.mainloop()
-  
-if __name__=="__main__":
+
+
+if __name__ == "__main__":
     args = parse_args()
     main(args)
