@@ -29,9 +29,11 @@ import torch
 
 import cv2
 import numpy as np
+import csv
 
 from PIL import ImageTk, Image
 from fastsam import FastSAM, FastSAMVideoPrompt
+from adding_accel_decel_waypoints import accel_del_waypoints
 from LatLongTurn_Integrated_Code import bi_linear_interpolation, turning_points
 
 
@@ -58,7 +60,7 @@ if gnc_path not in sys.path:
 print(f'Sys.path: {sys.path}')
 
 # Out-of-package imports
-from path_planner_2023 import generatePath
+from path_planner import PathPlanner 
 
 from mission_planner_code_python import plan_mission
 
@@ -359,9 +361,9 @@ class App(ttk.Frame):
         return selected_contour
 
     def __check_for_contour_point(self, x, y):
-        print(f'Checking for contour point at ({x}, {y})')  # Test print statement
         """ Returns the point and index within the currently selected 
             contour, if any, at the specified (x, y) coordinate. """
+        self.__print_debug(f'Checking for contour point at ({x}, {y})')  # Test print statement
 
         selected_point = None
         point_index = -1
@@ -508,11 +510,6 @@ class App(ttk.Frame):
             elif point[0][1] > bottom[0][1]:
                 bottom = point
 
-        # print(f"Left point: {left}")
-        # print(f"Right point: {right}")
-        # print(f"Top point: {right}")
-        # print(f"Bottom point: {bottom}")
-
         # Draw the bound points
         bounds_radius   = 5
         bounds_outline  = 'black'
@@ -532,61 +529,66 @@ class App(ttk.Frame):
 
     def __validate_entry_inputs(self):
         """ Verifies that text entries can be converted to floats. """
+        get_values = [
+            self.__entry_left_longitude.get(), self.__entry_right_longitude.get(),
+            self.__entry_top_latitude.get(), self.__entry_bottom_latitude.get()
+        ]
+        names = ['left longitude', 'right longitude', 'top latitude', 'bottom latitude']
 
-        try:
-            float(self.__entry_left_longitude.get())
-        except ValueError:
-            print('longitude left is invalid.')
-            return False
-
-        try:
-            float(self.__entry_right_longitude.get())
-        except ValueError:
-            print('longitude right is invalid.')
-            return False
-
-        try:
-            float(self.__entry_top_latitude.get())
-        except ValueError:
-            print('latitude top is invalid.')
-            return False
-
-        try:
-            float(self.__entry_bottom_latitude.get())
-        except ValueError:
-            print('latitude bottom is invalid.')
-            return False
+        for i, value in enumerate(get_values):
+            try:
+                float(value.get())
+            except ValueError:
+                print(f'{name} is invalid.')
+                return False
 
         return True
 
 
     def __generate_path(self):
         """ Generates and renders a path returned by the path planner. """
-        from adding_accel_decel_waypoints import accel_del_waypoints
+        self.__clear_path()
 
-        points_list = [[point[0][0], point[0][1]] for point in self.__segment_contour]
-        points_list = np.array(points_list)
+        points_list = np.array([[point[0][0], point[0][1]] for point in self.__segment_contour])
+        if args.verbose:
+            # Save the segment contour with "Latitude" and "Longitude" in the first row
+            self.__print_debug('Saving segment contour to segment_contour.csv')
+            with open('segment_countour.csv', 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(["Latitude", "Longitude"])
+                writer.writerows(points_list)
 
         # PATH DISTANCE CALCULATION (when physical parameters are unknown)
-        pathDist = abs((max(points_list[:, 0]) - min(points_list[:, 0]))/15)
+        if self.path_dist_ratio is None:
+            self.path_dist_ratio = 0.06
+            print("Path Distance Ratio set to default value of 0.06")
+        if self.tol_factor is None:
+            self.tol_factor = 1
+            print("Tolerance Factor set to default value of 1")
 
         # Generate a path
-        waypoint_coords, _, is_empty, _, _ = generatePath(points_list, pathDist)
-        assert not is_empty, 'Path generation failed.'
+        pp = PathPlanner()
+        pp.get_bounding_polygon(bounding_polygon=points_list)
+        waypoint_coords = pp.path_region(path_dist_ratio=self.path_dist_ratio, tol_factor=self.tol_factor, is_plot=False)
+        waypoint_coords = [item for sublist in waypoint_coords for item in sublist]
         # save the generated path to a csv
-        np.savetxt('generated_path.csv', waypoint_coords, delimiter=',', fmt='%f')
+        if args.verbose:
+            np.savetxt('generated_path.csv', waypoint_coords, delimiter=',', fmt='%f')
 
         updated_generated_path = accel_del_waypoints(waypoint_coords)
         # Store the generated path
-        # self.generated_path = waypoint_coords
-        self.generated_path = updated_generated_path  # 7/30/24 update
+        self.generated_path = updated_generated_path 
 
         #  Print the generated path
-        print("Generated Path:")
-        print(self.generated_path)
+        self.__print_debug("Generated Path:")
+        self.__print_debug(self.generated_path)
 
         # Draw the path
-        self.__img_canvas.create_line(waypoint_coords, fill='red', width=2)
+        self.__img_canvas.create_line(waypoint_coords, fill='red', width=2, tag='path')
+
+    def __clear_path(self):
+        """ Clears the previously generated path from the canvas. """
+        self.__img_canvas.delete('path')  # Assuming 'path' is the tag used for the path
 
     def __pp_to_latlongturn(self):
         """ Generate a list of latitude/longitude/turn points from the generated path planned. """
@@ -610,10 +612,10 @@ class App(ttk.Frame):
         top_x, top_y = self.__contour_bounds["top"]
         bottom_x, bottom_y = self.__contour_bounds["bottom"]
 
-        print(f"Left Point: ({left_x}, {left_y})")
-        print(f"Right Point: ({right_x}, {right_y})")
-        print(f"Top Point: ({top_x}, {top_y})")
-        print(f"Bottom Point: ({bottom_x}, {bottom_y})")
+        self.__print_debug(f"Left Point: ({left_x}, {left_y})")
+        self.__print_debug(f"Right Point: ({right_x}, {right_y})")
+        self.__print_debug(f"Top Point: ({top_x}, {top_y})")
+        self.__print_debug(f"Bottom Point: ({bottom_x}, {bottom_y})")
 
         points = [
             [left_x, left_y, lat_left, long_left],
@@ -629,7 +631,6 @@ class App(ttk.Frame):
 
         lat_long_interpolation = bi_linear_interpolation(reference_points, generated_path)
         lat_long_turn = turning_points(generated_path, lat_long_interpolation)
-        # print(lat_long_turn)
 
         return lat_long_turn
 
@@ -675,11 +676,34 @@ class App(ttk.Frame):
         except Exception as e:
             self.__print_debug(f'Failed to export waypoints: {e}')
 
+    def update_path_dist_ratio(self, event):
+        """Set the path_dist_ratio value."""
+        try:
+            self.path_dist_ratio = float(self.__entry_path_dist_ratio.get())
+            print(f'path_dist_ratio set to {self.path_dist_ratio}')
+            #self.__generate_path()
+        except ValueError:
+            print('Invalid value for path_dist_ratio.')
+
+    def update_tol_factor(self, event):
+        """Set the tol_factor value."""
+        try:
+            self.tol_factor = float(self.__entry_tol_factor.get())
+            print(f'tol_factor set to {self.tol_factor}')
+            #self.__generate_path()
+        except ValueError:
+            print('Invalid value for tol_factor.')
+
+
     def __init__(self, root):
         ttk.Frame.__init__(self, root)
         self.pack()
 
         self.winfo_toplevel().title('APRILab Water Body Detection Tool')
+
+        # parameters for planner
+        self.path_dist_ratio = None
+        self.tol_factor = None
 
         # Canvas element tags as variables to mitigate typos
         self.__contour_tag        = 'contour'
@@ -716,14 +740,14 @@ class App(ttk.Frame):
         self.__label_edit     = ttk.Label       (self.__frame_menu, text='Edit:')
         self.__check_polygon  = ttk.Checkbutton (self.__frame_menu, text='Bounding polygon',  command=self.__polygon_edit_changed,     variable=self.__allow_edit_polygon)
         self.__check_latlong  = ttk.Checkbutton (self.__frame_menu, text='Lat-long points',   command=self.__latlong_edit_changed,  variable=self.__allow_edit_latlong)
-        self.__label_left_longitude     = ttk.Label       (self.__frame_menu, text='Left - Longitude',      foreground='grey')
-        self.__entry_left_longitude     = ttk.Entry       (self.__frame_menu, state='disabled')
         self.__label_left_latitude = ttk.Label(self.__frame_menu, text='Left - Latitude', foreground='grey')
         self.__entry_left_latitude = ttk.Entry(self.__frame_menu, state='disabled')
-        self.__label_right_longitude    = ttk.Label       (self.__frame_menu, text='Right - Longitude',     foreground='grey')
-        self.__entry_right_longitude    = ttk.Entry       (self.__frame_menu, state='disabled')
+        self.__label_left_longitude     = ttk.Label       (self.__frame_menu, text='Left - Longitude',      foreground='grey')
+        self.__entry_left_longitude     = ttk.Entry       (self.__frame_menu, state='disabled')
         self.__label_right_latitude = ttk.Label(self.__frame_menu, text='Right - Latitude', foreground='grey')
         self.__entry_right_latitude = ttk.Entry(self.__frame_menu, state='disabled')
+        self.__label_right_longitude    = ttk.Label       (self.__frame_menu, text='Right - Longitude',     foreground='grey')
+        self.__entry_right_longitude    = ttk.Entry       (self.__frame_menu, state='disabled')
         self.__label_top_latitude      = ttk.Label       (self.__frame_menu, text='Top - Latitude',        foreground='grey')
         self.__entry_top_latitude      = ttk.Entry       (self.__frame_menu, state='disabled')
         self.__label_top_longitude = ttk.Label(self.__frame_menu, text='Top - Longitude', foreground='grey')
@@ -732,10 +756,13 @@ class App(ttk.Frame):
         self.__entry_bottom_latitude   = ttk.Entry       (self.__frame_menu, state='disabled')
         self.__label_bottom_longitude = ttk.Label(self.__frame_menu, text='Bottom - Longitude', foreground='grey')
         self.__entry_bottom_longitude = ttk.Entry(self.__frame_menu, state='disabled')
-        self.__waypnt_export  = ttk.Button       (self.__frame_menu, text='Export Waypoint File', command=self.__export_to_waypoint_file)
-        # self.__btn_export     = ttk.Button      (self.__frame_menu, text='Export to CSV',     command=self.__export_to_csv)
-
         self.__btn_path       = ttk.Button      (self.__frame_menu, text='Generate Path',     command=self.__generate_path, state='disabled') 
+        self.__waypnt_export  = ttk.Button       (self.__frame_menu, text='Export Waypoint File', command=self.__export_to_waypoint_file)
+        self.__label_path_dist_ratio = ttk.Label(self.__frame_menu, text='Path Dist Ratio')
+        self.__entry_path_dist_ratio = ttk.Entry(self.__frame_menu)
+
+        self.__label_tol_factor = ttk.Label(self.__frame_menu, text='Tol Factor')
+        self.__entry_tol_factor = ttk.Entry(self.__frame_menu)
 
         # Status frame
         self.__label_status   = ttk.Label       (self.__frame_status, text='Open an image')
@@ -778,10 +805,19 @@ class App(ttk.Frame):
         self.__label_bottom_longitude .grid(row=19, column=0, padx=menu_padx, pady=menu_pady_short, sticky='nsew')
         self.__entry_bottom_longitude .grid(row=20, column=0, padx=menu_padx, pady=menu_pady_long, sticky='nsew')
 
-        # self.__btn_export     .grid(row=21,   column=0, padx=menu_padx, pady=menu_pady_long,  sticky='nsew')
-        self.__btn_path       .grid(row=22,   column=0, padx=menu_padx, pady=menu_pady_long,  sticky='nsew')
+        self.__label_path_dist_ratio.grid(row=21, column=0, padx=menu_padx, pady=menu_pady_short, sticky='nsew')
+        self.__entry_path_dist_ratio.grid(row=22, column=0, padx=menu_padx, pady=menu_pady_short, sticky='nsew')
 
-        self.__waypnt_export  .grid(row=21,   column=0, padx=menu_padx, pady=menu_pady_long,  sticky='nsew')
+        self.__label_tol_factor.grid(row=23, column=0, padx=menu_padx, pady=menu_pady_short, sticky='nsew')
+        self.__entry_tol_factor.grid(row=24, column=0, padx=menu_padx, pady=menu_pady_short, sticky='nsew')
+
+        self.__entry_path_dist_ratio.bind('<KeyRelease>', self.update_path_dist_ratio)
+        self.__entry_tol_factor.bind('<KeyRelease>', self.update_tol_factor)
+
+        # self.__btn_export     .grid(row=21,   column=0, padx=menu_padx, pady=menu_pady_long,  sticky='nsew')
+        self.__btn_path       .grid(row=25,   column=0, padx=menu_padx, pady=menu_pady_long,  sticky='nsew')
+
+        self.__waypnt_export  .grid(row=26,   column=0, padx=menu_padx, pady=menu_pady_long,  sticky='nsew')
 
         # Gridding - status frame
         self.__label_status   .grid(row=0, column=0, padx=5, pady=5, sticky='nsew')

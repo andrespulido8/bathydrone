@@ -23,7 +23,7 @@ class PathPlanner:
 
     Attributes:
         self.bounding: BoundingRegion object to be pathed.
-        self.sideScanAngle: angle of the side-scan sonar.
+        self.sideScanAngle: angle of the side-scan sonar. (NOT implemented yet)
         self.maxRange: maximum range of the side-scan sonar.
         self.minRange: minimum range of the side-scan sonar.
         self.noRequireParallel: disable parallel pathing requirement.
@@ -32,14 +32,12 @@ class PathPlanner:
     def __init__(self, sideScanAngle=30, **system_params):
         self.bounding = None
         self.sideScanAngle = sideScanAngle
-        self.maxRange = system_params.get(
-            "maxRange", None
-        )  # maximum range of the side-scan sonar.
+        self.maxRange = system_params.get("maxRange", None) 
         self.minRange = system_params.get("minRange", None)
         self.maxDepth = system_params.get("maxDepth", None)
         self.noRequireParallel = system_params.get("noRequireParallel", None)
 
-    def path_region(self):
+    def path_region(self, path_dist_ratio=0.05, tol_factor=1, is_plot=True):
         """Generate a complete coverage path for a side-scan sonar vessel on an arbitrary convex region."""
         # GENERATE POLYGON OBJECT (required for shapely)
         geom = Polygon(self.bounding.polygonVertices)
@@ -47,9 +45,9 @@ class PathPlanner:
 
         # APPROXIMATE DECOMPOSITION
         # Path distance approximation (when physical parameters are unknown)
-        pathDist = abs((max(xList) - min(xList)) / 18)
+        pathDist = abs((max(xList) - min(xList)) * path_dist_ratio) 
         # Decomposition Tolerance Constant (SL-Concavity)
-        tol = pathDist * 1
+        tol = pathDist * tol_factor 
         pTest = self.decomposePolygon(tol, geom)
 
         # GENERATE PATH FOR EACH DECOMPOSED POLYGON
@@ -62,18 +60,20 @@ class PathPlanner:
         best_distance, best_route = self.orderTwoOpt(pathCenters)
 
         # PLOTTING
-        self.plotPath(xList, yList, testPathArr, pathCenters, best_route, best_distance)
+        if is_plot:
+            self.plotPath(xList, yList, testPathArr, pathCenters, best_route, best_distance)
+        else:
+            return testPathArr
 
     def get_bounding_polygon(self, **boundingInput):
         """Create a Bounding Polygon Object to Store in the PathPlanner."""
         # TODO add support for depth map
-        # TODO add support for direct polygon input (array of tuples)
         if "csvName" in boundingInput:
             # fetch from CSV
-            setattr(self, "bounding", BoundingRegion(boundingInput["csvName"]))
-        if "boundingPolygon" in boundingInput:
+            setattr(self, "bounding", BoundingRegion(bounding_polygon=None, csvName=boundingInput["csvName"]))
+        elif "bounding_polygon" in boundingInput:
             # get from bounding polygon provided directly as an array of tuples.
-            print("Please input a csv")
+            setattr(self, "bounding", BoundingRegion(bounding_polygon=boundingInput["bounding_polygon"], csvName=None))
 
     def generate_path(
         self, polygon_points: List[Tuple[float, float]], path_dist: float
@@ -399,7 +399,7 @@ class PathPlanner:
         """get region of interest from csv (edge detection)"""
         xList = []
         yList = []
-        file_path = os.path.join(os.getcwd(), "csv", csvName)
+        file_path = os.path.join(os.getcwd(), csvName)
         df = pd.read_csv(file_path, usecols=["Latitude", "Longitude"])
         yList = df.Latitude.values.tolist()
         xList = df.Longitude.values.tolist()
@@ -426,7 +426,12 @@ class PathPlanner:
         return pathCenters, testPathArr
 
     def decomposePolygon(self, tolerance, polygonToDecompose):
-        """decompose polygon in to approximately convex sub-polygons"""
+        """ Decompose polygon in to approximately convex sub-polygons
+            
+        Args:
+            tolerance (float): tolerance for decomposition
+            polygonToDecompose (Polygon): polygon to decompose
+        """
         poly = gpd.GeoSeries([polygonToDecompose])
         polyCoords = poly.get_coordinates()
         polyCoordsList = list(polyCoords.itertuples(index=False, name=None))
@@ -475,7 +480,7 @@ class PathPlanner:
 
         # PLOTTING PATHS
         # print(testPathArr)
-        ax1.plot(xList, yList, c="black", marker="o", markersize="0.25")
+        ax1.plot(xList, yList, c="red", marker="o", markersize="0.25")
         for i in range(len(testPathArr)):
             x1, y1 = zip(*testPathArr[i])
             ax1.plot(x1, y1, c="green", marker="o", markersize="0.5", zorder=1)
@@ -555,15 +560,20 @@ class BoundingRegion:
         polygonVertices (list of tuples): vertices forming exterior of the bounding polygon.
     """
 
-    def __init__(self, csvName):
-        self.polygonVertices = self.get_polygon_from_csv(csvName)
+    def __init__(self, bounding_polygon, csvName):
+        if csvName is None:
+            assert bounding_polygon is not None, "No polygon provided."
+            self.polygonVertices = [tuple(xy_list) for xy_list in bounding_polygon]
+        else:
+            assert bounding_polygon is None, "Provide either bounding polygon or csv. Set other as None."
+            self.polygonVertices = self.get_polygon_from_csv(csvName)
 
     @staticmethod
     def get_polygon_from_csv(csvName):
         """get region of interest from csv (manual)"""
         file_path = os.path.join(os.getcwd(), "csv", csvName)
         df = pd.read_csv(file_path, usecols=["Latitude", "Longitude"])
-        return list(zip(df.Longitude.values.tolist(), df.Latitude.values.tolist()))
+        return list(zip(df.Latitude.values.tolist(), df.Longitude.values.tolist()))
 
 
 def main():
@@ -574,7 +584,7 @@ def main():
     2. Set the bounding polygon from csv.
     3. Generate and display a coverage path for the region.
     """
-    my_planner = PathPlanner(45, maxRange=1000)
+    my_planner = PathPlanner()
     my_planner.get_bounding_polygon(csvName="newnans-lake-coords.csv")
     my_planner.path_region()
     return 0
