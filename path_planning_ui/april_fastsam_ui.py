@@ -632,10 +632,10 @@ class App(ttk.Frame):
 
         # PATH DISTANCE CALCULATION (when physical parameters are unknown)
         if self.path_dist_ratio is None:
-            self.path_dist_ratio = 0.06
+            self.path_dist_ratio = 0.035
             print("Path Distance Ratio set to default value of 0.06")
         if self.tol_factor is None:
-            self.tol_factor = 1
+            self.tol_factor = 4
             print("Tolerance Factor set to default value of 1")
 
         # Generate a path
@@ -660,7 +660,9 @@ class App(ttk.Frame):
         self.__print_debug(self.generated_path)
 
         # Draw the path
-        self.__img_canvas.create_line(waypoint_coords, fill="red", width=2, tag="path")
+        self.__img_canvas.create_line(
+            waypoint_coords, fill="white", width=4, tag="path"
+        )
 
     def __clear_path(self):
         """Clears the previously generated path from the canvas."""
