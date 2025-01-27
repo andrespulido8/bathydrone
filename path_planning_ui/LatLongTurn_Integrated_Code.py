@@ -37,8 +37,8 @@ def bi_linear_interpolation(points_reference, points_targeted):
 def turning_points(xy_path_generated, lat_long_interpolation):  # using xy pixel data for more robustness ; not latitude & longitude
     """Turning point function for generated path
     This function takes in the generated planned path (in xy pixel coordinates) and the latitude and longitude interpolation values.
-    If the waypoint within the numpy array sequence of the generated planned path is divisible by 4 with no remaineder, it is marked as 1
-    within a turn list indicating this waypoint is a spline waypoint. All other waypoints not divisible by 4 are marked as 0.
+    If the waypoint within the numpy array sequence of the generated planned path has an even element value within the array, it is marked as a turning way point, 
+    while all other way points are marked as non turning way points. 
      
     Args:
         xy_path_generated: numpy array of the generated planned waypoints in xy pixel data.
@@ -50,14 +50,10 @@ def turning_points(xy_path_generated, lat_long_interpolation):  # using xy pixel
     turn_list = np.zeros(len(xy_path_generated), dtype=int)
 
     for i in range(1, len(xy_path_generated)):
-        if i % 4 == 1 or i / 4 == 0.25:  # 'acceleration' - way point
-            turn_list[i] = 0
-        if i % 4 == 2 or i / 4 == 0.5:  # 'deceleration' - waypoint
-            turn_list[i] = 0
-        if i % 4 == 3 or i / 4 == 0.75:  # non spline waypoint
-            turn_list[i] = 0
-        if i % 4 == 0:  # spline waypoint
-            turn_list[i] = 1
+        if i % 2 == 0:  
+            turn_list[i] = 1  # turning way point
+        else:
+            turn_list[i] = 0  # non turning way point 
     lat_long_turn = np.column_stack((lat_long_interpolation, turn_list))
 
     return lat_long_turn
