@@ -608,9 +608,9 @@ class App(ttk.Frame):
 
         for i, value in enumerate(get_values):
             try:
-                float(value.get())
+                float(value)
             except ValueError:
-                print(f"{name} is invalid.")
+                print(f"{names[i]} is invalid. Value entered: {value}")
                 return False
 
         return True
@@ -625,7 +625,7 @@ class App(ttk.Frame):
         if args.verbose:
             # Save the segment contour with "Latitude" and "Longitude" in the first row
             self.__print_debug("Saving segment contour to segment_contour.csv")
-            with open("segment_countour.csv", "w", newline="") as f:
+            with open("segment_contour.csv", "w", newline="") as f:
                 writer = csv.writer(f)
                 writer.writerow(["Latitude", "Longitude"])
                 writer.writerows(points_list)
@@ -709,6 +709,20 @@ class App(ttk.Frame):
         lat_long_interpolation = bi_linear_interpolation(
             reference_points, generated_path
         )
+
+        points_list = np.array(
+            [[point[0][0], point[0][1]] for point in self.__segment_contour]
+        )
+        lat_long_bounds = bi_linear_interpolation(
+            reference_points, points_list
+        )
+        # Save the segment contour with "Latitude" and "Longitude" in the first row
+        self.__print_debug("Saving transformed segment contour to transformed_segment_contour.csv")
+        with open("transformed_segment_contour.csv", "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["Latitude", "Longitude"])
+            writer.writerows(lat_long_bounds)
+
         lat_long_turn = turning_points(generated_path, lat_long_interpolation)
 
         return lat_long_turn
@@ -1031,9 +1045,9 @@ def parse_args():
     parser.add_argument(
         "-v",
         "--verbose",
-        type=bool,
+        action="store_true",
         default=False,
-        action=argparse.BooleanOptionalAction,
+        help="Enable verbose output"
     )
     parser.add_argument(
         "-m", "--model_path", type=str, default="./weights/FastSAM-x.pt"
@@ -1043,7 +1057,10 @@ def parse_args():
     parser.add_argument("--conf", type=float, default=0.4)
     parser.add_argument("--iou", type=float, default=0.9)
     parser.add_argument(
-        "--random_color", type=bool, default=True, action=argparse.BooleanOptionalAction
+        "--random_color", 
+        action="store_true",
+        default=True,
+        help="Enable random colors for segmentation"
     )
     parser.add_argument(
         "-o",
