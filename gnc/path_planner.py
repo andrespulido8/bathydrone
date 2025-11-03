@@ -56,8 +56,11 @@ class PathPlanner:
             pTest, pathDist, [startPos]
         )
 
+        # APPEND PATHS FOR EACH DECOMPOSED POLYGON INTO ONE OPTIMIZED PATH
+        optimized_path = self.appending_order_of_paths(testPathArr)
+
         # 2-OPT HEURISTIC
-        best_distance, best_route = self.orderTwoOpt(pathCenters)
+        best_distance, best_route = self.orderTwoOpt(pathCenters)  # understand why pathCenters is getting fed into 2 opt 
 
         # PLOTTING
         if is_plot:
@@ -561,6 +564,39 @@ class PathPlanner:
             )
 
         plt.show()
+    
+    def appending_order_of_paths(testPathArr):
+        poly1, poly2 = testPathArr
+        min_distance = float('inf')
+        optimized_path = []
+        min_distance_points = []
+
+        candidates = [
+            (poly1[-1], poly2[0]),
+            (poly1[-1], poly2[-1]),
+            (poly1[0], poly2[0]),
+            (poly1[0], poly2[-1])
+        ]
+        
+        for pair in candidates:
+            p1, p2 = pair
+            dist = math.dist(p1, p2)
+            if dist < min_distance:
+                min_distance = dist
+                min_distance_points = [p1, p2]
+        
+        if min_distance_points != candidates[0]:
+            if min_distance_points == candidates[1]:
+                poly2.reverse()
+            elif min_distance_points == candidates[2]:
+                poly1.reverse()
+                poly2.reverse()
+            elif min_distance_points == candidates[3]:
+                poly1.reverse()
+        
+        optimized_path = poly1 + poly2
+
+        return optimized_path
 
 
 # TODO add manipulations to bounding region polygon.

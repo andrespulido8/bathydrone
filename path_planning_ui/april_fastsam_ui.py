@@ -95,6 +95,11 @@ class App(ttk.Frame):
         self.__entry_top_latitude.config(state="disabled")
         self.__entry_bottom_latitude.config(state="disabled")
         self.__waypnt_export.config(state="disabled")
+        self.__entry_path_dist_ratio.config(state="disabled")
+        self.__entry_tol_factor.config(state="disabled")
+        self.__entry_straight_velocity.config(state="disabled")
+        self.__entry_turn_velocity.config(state="disabled")
+
         # self.__btn_export     .config(state='disabled')
 
         self.__label_edit.config(foreground="grey")
@@ -106,6 +111,10 @@ class App(ttk.Frame):
         self.__label_top_longitude.config(foreground="grey")
         self.__label_bottom_latitude.config(foreground="grey")
         self.__label_bottom_longitude.config(foreground="grey")
+        self.__label_path_dist_ratio.config(foreground="grey")
+        self.__label_tol_factor.config(foreground="grey")
+        self.__label_straight_velocity.config(foreground="grey")
+        self.__label_turn_velocity.config(foreground="grey")
 
     def __enable_img_options(self):
         """Enable UI options related to editing and using the selected water body edge."""
@@ -115,8 +124,16 @@ class App(ttk.Frame):
         # self.__btn_export     .config(state='enabled')
         self.__waypnt_export.config(state="enabled")
         self.__btn_path.config(state="enabled")
+        self.__entry_path_dist_ratio.config(state="enabled")
+        self.__entry_tol_factor.config(state="enabled")
+        self.__entry_straight_velocity.config(state="enabled")
+        self.__entry_turn_velocity.config(state="enabled")
 
         self.__label_edit.config(foreground="black")
+        self.__label_path_dist_ratio.config(foreground="black")
+        self.__label_tol_factor.config(foreground="black")
+        self.__label_straight_velocity.config(foreground="black")
+        self.__label_turn_velocity.config(foreground="black")
 
     def __set_segmenting_state(self, new_state):
         """Update the state of the segmenting button. Just a wrapper for readability purposes."""
@@ -280,7 +297,7 @@ class App(ttk.Frame):
 
         # Draw new points
         self.__draw_bound_points()
-
+    
     def __browse_files(self):
         """Spawn a file browser from which the user can select an image."""
         filename = filedialog.askopenfilename(
@@ -608,7 +625,7 @@ class App(ttk.Frame):
 
         for i, value in enumerate(get_values):
             try:
-                float(value)
+                float(value) 
             except ValueError:
                 print(f"{names[i]} is invalid. Value entered: {value}")
                 return False
@@ -631,11 +648,11 @@ class App(ttk.Frame):
                 writer.writerows(points_list)
 
         # PATH DISTANCE CALCULATION (when physical parameters are unknown)
-        if self.path_dist_ratio is None:
-            self.path_dist_ratio = 0.035
+        if self.path_dist_ratio_var.get() == "0.06":
+            self.path_dist_ratio = 0.035 # verify if this value is right or not 
             print("Path Distance Ratio set to default value of 0.06")
-        if self.tol_factor is None:
-            self.tol_factor = 4
+        if self.tol_factor_var.get() == "1.0":
+            self.tol_factor = 4  # verify if this value is right 
             print("Tolerance Factor set to default value of 1")
 
         # Generate a path
@@ -647,13 +664,16 @@ class App(ttk.Frame):
             is_plot=False,
         )
         waypoint_coords = [item for sublist in waypoint_coords for item in sublist]
+        waypoint_coords_array = np.array(waypoint_coords)
+
         # save the generated path to a csv
         if args.verbose:
             np.savetxt("generated_path.csv", waypoint_coords, delimiter=",", fmt="%f")
 
-        updated_generated_path = accel_del_waypoints(waypoint_coords)
         # Store the generated path
-        self.generated_path = updated_generated_path
+        self.generated_path = waypoint_coords_array  
+        print("Generated Path:")
+        print(self.generated_path)
 
         #  Print the generated path
         self.__print_debug("Generated Path:")
@@ -673,7 +693,7 @@ class App(ttk.Frame):
 
         # lat/long coordinate boundaries (input by user)
 
-        long_left = float(self.__entry_left_longitude.get())
+        long_left = float(self.__entry_left_longitude.get())  
         lat_left = float(self.__entry_left_latitude.get())
 
         long_right = float(self.__entry_right_longitude.get())
@@ -725,9 +745,13 @@ class App(ttk.Frame):
 
         lat_long_turn = turning_points(generated_path, lat_long_interpolation)
 
-        return lat_long_turn
+        self.__lat_long_turn = turning_points(generated_path, lat_long_interpolation)
 
-    def __mission_planner_waypoint(self, lat_long_turn):
+        if self.__lat_long_turn is None:
+            self.__print_debug("Error: lat_long_turn is still None after calling __pp_to_latlongturn().")
+
+
+    def __mission_planner_waypoint(self):
         """Function created to generate a .waypoint file that contains details pertaining to the drone's autonomous planned path.
         The file generated is to be imported into Mission Planner application.
 
@@ -737,11 +761,27 @@ class App(ttk.Frame):
         Returns:
             waypoints_data: .waypoints file that contains a 9 column array containing parameter information for drone's waypoints."""
 
-        waypoints_data = plan_mission(
-            lat_long_turn
+        if self.__lat_long_turn is None:
+            self.__print_debug("Error: No lat_long_turn data. Running __pp_to_latlongturn first.")
+            self.__pp_to_latlongturn()
+
+        if self.__lat_long_turn is None:
+            self.__print_debug("Error: Failed to generate lat_long_turn data.")
+            return  # Stop execution if lat_long_turn is still None
+        
+        try:
+            straight_velocity = int(self.__entry_straight_velocity.get())
+            turn_velocity = int(self.__entry_turn_velocity.get())
+        except ValueError:
+            self.__print_debug("Invalid velocity input! Please enter valid numbers.")
+            return  # Prevents execution if inputs are invalid
+
+        self.__waypoints_data = plan_mission(
+            self.__lat_long_turn, straight_velocity, turn_velocity
         )  # associated button for export : line 810
 
-        return waypoints_data
+        if self.__waypoints_data is None:
+            self.__print_debug("Error: plan_mission() returned None.")
 
     def __export_to_waypoint_file(self):
         """Exports Henry's Mission Planner Code Data to a WayPoint File When Export Button Is Pressed."""
@@ -750,12 +790,17 @@ class App(ttk.Frame):
             return
 
         self.__print_debug("exporting!")
-        # lat_long_turn_data = self.__lat_long_interpolation()  # for use when accurate lat, long, interpolation is ready
 
-        lat_long_turn_data = self.__pp_to_latlongturn()
-        mission_planner_way_points_data = self.__mission_planner_waypoint(
-            lat_long_turn_data
-        )
+        # Ensure waypoints data exists
+        if not hasattr(self, "_App__waypoints_data") or self.__waypoints_data is None:
+            self.__print_debug("Generating waypoints data...")
+            self.__mission_planner_waypoint()  # Generate waypoints data
+
+        if self.__waypoints_data is None:
+            self.__print_debug("Error: Failed to generate waypoints data.")
+            return  # Stop execution if __waypoints_data is still None
+
+        mission_planner_way_points_data = self.__waypoints_data
 
         # Write output to '.waypoints' file
 
@@ -801,6 +846,8 @@ class App(ttk.Frame):
         # parameters for planner
         self.path_dist_ratio = None
         self.tol_factor = None
+        self.__lat_long_turn = None
+        self.__waypoints_data = None
 
         # Canvas element tags as variables to mitigate typos
         self.__contour_tag = "contour"
@@ -894,12 +941,35 @@ class App(ttk.Frame):
             command=self.__export_to_waypoint_file,
         )
         self.__label_path_dist_ratio = ttk.Label(
-            self.__frame_menu, text="Path Dist Ratio"
+            self.__frame_menu, text="Path Dist Ratio", foreground="grey"
         )
-        self.__entry_path_dist_ratio = ttk.Entry(self.__frame_menu)
-
-        self.__label_tol_factor = ttk.Label(self.__frame_menu, text="Tol Factor")
-        self.__entry_tol_factor = ttk.Entry(self.__frame_menu)
+        self.path_dist_ratio_var = tk.StringVar(
+            value="0.06"
+        ) # sets default value for path distance ratio 
+        self.__entry_path_dist_ratio = ttk.Entry(
+            self.__frame_menu, textvariable=self.path_dist_ratio_var, state="disabled"
+        )
+        self.__label_tol_factor = ttk.Label(
+            self.__frame_menu, text="Tol Factor", foreground="grey"
+        )
+        self.tol_factor_var = tk.StringVar(
+            value="1.0"
+        )
+        self.__entry_tol_factor = ttk.Entry(
+            self.__frame_menu, textvariable=self.tol_factor_var, state="disabled"
+        )
+        self.__label_straight_velocity = ttk.Label(
+            self.__frame_menu, text="Straight Velocity", foreground="grey"
+        )
+        self.__entry_straight_velocity = ttk.Entry(
+            self.__frame_menu, state="disabled"
+        )
+        self.__label_turn_velocity = ttk.Label(
+            self.__frame_menu, text="Turn Velocity", foreground="grey"
+        )
+        self.__entry_turn_velocity = ttk.Entry(
+            self.__frame_menu, state="disabled"
+        )
 
         # Status frame
         self.__label_status = ttk.Label(self.__frame_status, text="Open an image")
@@ -997,17 +1067,29 @@ class App(ttk.Frame):
         self.__entry_tol_factor.grid(
             row=24, column=0, padx=menu_padx, pady=menu_pady_short, sticky="nsew"
         )
+        self.__label_straight_velocity.grid(
+            row=25, column=0, padx=menu_padx, pady=menu_pady_short, sticky="nsew"
+        )
+        self.__entry_straight_velocity.grid(
+            row=26, column=0, padx=menu_padx, pady=menu_pady_short, sticky="nsew"
+        )
+        self.__label_turn_velocity.grid(
+            row=27, column=0, padx=menu_padx, pady=menu_pady_short, sticky="nsew"
+        )
+        self.__entry_turn_velocity.grid(
+            row=28, column=0, padx=menu_padx, pady=menu_pady_short, sticky="nsew"
+        )
 
         self.__entry_path_dist_ratio.bind("<KeyRelease>", self.update_path_dist_ratio)
         self.__entry_tol_factor.bind("<KeyRelease>", self.update_tol_factor)
 
         # self.__btn_export     .grid(row=21,   column=0, padx=menu_padx, pady=menu_pady_long,  sticky='nsew')
         self.__btn_path.grid(
-            row=25, column=0, padx=menu_padx, pady=menu_pady_long, sticky="nsew"
+            row=29, column=0, padx=menu_padx, pady=menu_pady_long, sticky="nsew"
         )
 
         self.__waypnt_export.grid(
-            row=26, column=0, padx=menu_padx, pady=menu_pady_long, sticky="nsew"
+            row=30, column=0, padx=menu_padx, pady=menu_pady_long, sticky="nsew"
         )
 
         # Gridding - status frame
