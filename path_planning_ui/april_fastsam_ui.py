@@ -196,6 +196,7 @@ class App(ttk.Frame):
 
             # Simplify contour before drawing and storing
             # Reference: https://stackoverflow.com/questions/41879315/opencv-visualize-polygonal-curves-extracted-with-cv2-approxpolydp
+            # if you want more points, decrease the multiplier below
             epsilon = (2e-3) * cv2.arcLength(segment_contour_full, True)
             self.__segment_contour = cv2.approxPolyDP(
                 segment_contour_full, epsilon, True

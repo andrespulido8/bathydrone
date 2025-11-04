@@ -565,40 +565,53 @@ class PathPlanner:
 
         plt.show()
     
+    @staticmethod
     def appending_order_of_paths(testPathArr):
-        poly1, poly2 = testPathArr
-        min_distance = float('inf')
-        optimized_path = []
-        min_distance_points = []
-
-        candidates = [
-            (poly1[-1], poly2[0]),
-            (poly1[-1], poly2[-1]),
-            (poly1[0], poly2[0]),
-            (poly1[0], poly2[-1])
-        ]
+        if not testPathArr:  # If empty array
+            return []
+        if len(testPathArr) == 1:  # If only one path
+            return testPathArr[0]
+            
+        # Start with the first path
+        optimized_path = list(testPathArr[0])
         
-        for pair in candidates:
-            p1, p2 = pair
-            dist = math.dist(p1, p2)
-            if dist < min_distance:
-                min_distance = dist
-                min_distance_points = [p1, p2]
+        # Iteratively add remaining paths
+        for next_path in testPathArr[1:]:
+            if not next_path:  # Skip empty paths
+                continue
+                
+            min_distance = float('inf')
+            best_configuration = None
+            
+            # Try all possible connections between current path and next path
+            candidates = [
+                (optimized_path[-1], next_path[0], False, False),   # End to start
+                (optimized_path[-1], next_path[-1], False, True),   # End to end
+                (optimized_path[0], next_path[0], True, False),     # Start to start
+                (optimized_path[0], next_path[-1], True, True)      # Start to end
+            ]
+            
+            # Find the best connection configuration
+            for p1, p2, reverse_current, reverse_next in candidates:
+                dist = math.dist(p1, p2)
+                if dist < min_distance:
+                    min_distance = dist
+                    best_configuration = (reverse_current, reverse_next)
+            
+            # Apply the best configuration
+            if best_configuration:
+                reverse_current, reverse_next = best_configuration
+                if reverse_current:
+                    optimized_path.reverse()
+                next_path_copy = list(next_path)
+                if reverse_next:
+                    next_path_copy.reverse()
+                    
+                # Connect the paths
+                optimized_path.extend(next_path_copy)
         
-        if min_distance_points != candidates[0]:
-            if min_distance_points == candidates[1]:
-                poly2.reverse()
-            elif min_distance_points == candidates[2]:
-                poly1.reverse()
-                poly2.reverse()
-            elif min_distance_points == candidates[3]:
-                poly1.reverse()
-        
-        optimized_path = poly1 + poly2
-
         return optimized_path
-
-
+        
 # TODO add manipulations to bounding region polygon.
 class BoundingRegion:
     """
